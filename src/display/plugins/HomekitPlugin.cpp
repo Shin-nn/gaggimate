@@ -59,6 +59,8 @@ void HomekitPlugin::setup(Controller *controller, PluginManager *pluginManager) 
         int apMode = event.getInt("AP");
         if (apMode)
             return;
+        if (accessory != nullptr)
+            return;
         homeSpan.setHostNameSuffix("");
         homeSpan.setPortNum(HOMESPAN_PORT);
         homeSpan.begin(Category::Thermostats, DEVICE_NAME, this->controller->getSettings().getMdnsName().c_str());
@@ -73,7 +75,7 @@ void HomekitPlugin::setup(Controller *controller, PluginManager *pluginManager) 
     pluginManager->on("boiler:targetTemperature:change", [this](Event const &event) {
         if (accessory == nullptr)
             return;
-        accessory->setTargetTemperature(event.getInt("value"));
+        accessory->setTargetTemperature(event.getFloat("value"));
     });
 
     pluginManager->on("boiler:currentTemperature:change", [this](Event const &event) {

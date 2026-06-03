@@ -1,6 +1,24 @@
 import { computed } from '@preact/signals';
 import { ApiServiceContext, machine } from '../../services/ApiService.js';
-import { useCallback, useContext } from 'preact/hooks';
+import { useCallback, useContext, useState, useEffect } from 'preact/hooks';
+import { useQuery } from 'preact-fetching';
+import PropTypes from 'prop-types';
+import { faPause } from '@fortawesome/free-solid-svg-icons/faPause';
+import { faCheck } from '@fortawesome/free-solid-svg-icons/faCheck';
+import { faPlay } from '@fortawesome/free-solid-svg-icons/faPlay';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faThermometerHalf } from '@fortawesome/free-solid-svg-icons/faThermometerHalf';
+import { faGauge } from '@fortawesome/free-solid-svg-icons/faGauge';
+import { faRectangleList } from '@fortawesome/free-solid-svg-icons/faRectangleList';
+import { faTint } from '@fortawesome/free-solid-svg-icons/faTint';
+import { faClock } from '@fortawesome/free-solid-svg-icons/faClock';
+import { faWeightScale } from '@fortawesome/free-solid-svg-icons/faWeightScale';
+import { ProcessProfileChart } from '../../components/ProcessProfileChart.jsx';
+import { faPlus } from '@fortawesome/free-solid-svg-icons/faPlus';
+import { faMinus } from '@fortawesome/free-solid-svg-icons/faMinus';
+import { Tooltip } from '../../components/Tooltip.jsx';
+import { MODES } from './utils.js';
+import { ModeTab } from './ModeTab.jsx';
 
 const status = computed(() => machine.value.status);
 
@@ -12,93 +30,580 @@ function formatDuration(duration) {
   return `${zeroPad(minutes, 1)}:${zeroPad(seconds, 2)}`;
 }
 
-const BrewProgress = (props) => {
+const GrindProgress = props => {
   const { processInfo } = props;
   const active = !!processInfo.a;
   const progress = (processInfo.pp / processInfo.pt) * 100.0;
-
   const elapsed = Math.floor(processInfo.e / 1000);
 
   return (
-    <div className="flex flex-col justify-center items-center w-full">
+    <div className='flex w-full flex-col items-center justify-center space-y-4 px-4'>
       {active && (
         <>
-          <span className="text-gray-600 font-light text-xl">{processInfo.s === 'brew' ? 'BREW' : 'PREINFUSION'}</span>
-          <span className="text-xl">{processInfo.l}</span>
-          <div className="w-9/12 my-2 bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-            <div className="bg-blue-600 h-2.5 rounded-full" style={`width: ${progress.toFixed(0)}%`}></div>
+          <div className='space-y-2 text-center'>
+            <div className='text-base-content/60 text-xs font-light tracking-wider sm:text-sm'>
+              GRINDING
+            </div>
+            <div className='text-base-content text-2xl font-bold sm:text-4xl'>{processInfo.l}</div>
+          </div>
+
+          <div className='w-full max-w-md'>
+            <div className='bg-base-content/20 h-2 w-full rounded-full'>
+              <div
+                className='bg-primary h-2 rounded-full transition-all duration-300 ease-out'
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+
+          <div className='space-y-2 text-center'>
+            <div className='text-base-content/60 text-xs sm:text-sm'>
+              {processInfo.tt === 'time' && `${(processInfo.pt / 1000).toFixed(0)}s`}
+              {processInfo.tt === 'volumetric' && `${processInfo.pt.toFixed(1)}g`}
+            </div>
+            <div className='text-base-content text-2xl font-bold sm:text-3xl'>
+              {formatDuration(elapsed)}
+            </div>
           </div>
         </>
       )}
-      {processInfo.tt === 'volumetric' ||
-        (active && (
-          <span className="text-sm text-gray-700 dark:text-gray-400">
-            {processInfo.tt === 'time' && `${(processInfo.pt / 1000).toFixed(1)}s`}
-            {processInfo.tt === 'volumetric' && `${processInfo.pt.toFixed(1)}g`}
-          </span>
-        ))}
-      {!active && <span className="text-lg">Finished</span>}
-      <span className={active ? 'text-lg' : 'text-2xl my-2'}>{formatDuration(elapsed)}</span>
+      {!active && (
+        <div className='space-y-2 text-center'>
+          <div className='text-base-content text-xl font-bold sm:text-2xl'>Finished</div>
+          <div className='text-base-content text-2xl font-bold sm:text-3xl'>
+            {formatDuration(elapsed)}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const ProcessControls = (props) => {
-  const { brew } = props;
-  const brewTarget = status.value.brewTarget;
+const BrewProgress = props => {
+  const { processInfo } = props;
+  const active = !!processInfo.a;
+  const progress = (processInfo.pp / processInfo.pt) * 100.0;
+  const elapsed = Math.floor(processInfo.e / 1000);
+
+  return (
+    <div className='flex w-full flex-col items-center justify-center space-y-4 px-4'>
+      {active && (
+        <>
+          <div className='space-y-2 text-center'>
+            <div className='text-base-content/60 text-xs font-light tracking-wider sm:text-sm'>
+              {processInfo.s === 'brew' ? 'INFUSION' : 'PREINFUSION'}
+            </div>
+            <div className='text-base-content text-2xl font-bold sm:text-4xl'>{processInfo.l}</div>
+          </div>
+
+          <div className='w-full max-w-md'>
+            <div className='bg-base-content/20 h-2 w-full rounded-full'>
+              <div
+                className='bg-primary h-2 rounded-full transition-all duration-300 ease-out'
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+
+          <div className='space-y-2 text-center'>
+            <div className='text-base-content/60 text-xs sm:text-sm'>
+              {processInfo.tt === 'time' && `${(processInfo.pt / 1000).toFixed(0)}s`}
+              {processInfo.tt === 'volumetric' && `${processInfo.pt.toFixed(0)}g`}
+            </div>
+            <div className='text-base-content text-2xl font-bold sm:text-3xl'>
+              {formatDuration(elapsed)}
+            </div>
+          </div>
+        </>
+      )}
+      {!active && (
+        <div className='space-y-2 text-center'>
+          <div className='text-base-content text-xl font-bold sm:text-2xl'>Finished</div>
+          <div className='text-base-content text-2xl font-bold sm:text-3xl'>
+            {formatDuration(elapsed)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ProcessControls = props => {
+  // brew is true when mode equals 1 (Brew mode), false otherwise
+  const { brew, mode, changeMode } = props;
+  // Coerce brewTarget to strict boolean
+  const brewTarget = !!status.value.brewTarget;
   const processInfo = status.value.process;
   const active = !!processInfo?.a;
-  const finished = !!processInfo && !active;
+  const finished = !!processInfo?.e && !active;
+  const grind = mode === 4; // Grind mode
   const apiService = useContext(ApiServiceContext);
+  const [isFlushing, setIsFlushing] = useState(false);
+  const [profileData, setProfileData] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Fetch profile data when the selected profileID changes
+  // selectedProfile (name string) is intentionally excluded — the ID is the
+  // unique identifier and the name can change reference on every status update.
+  useEffect(() => {
+    const selectedProfileId = status.value.selectedProfileId;
+
+    if (!selectedProfileId || !apiService) {
+      setProfileData(null);
+      return;
+    }
+
+    const fetchProfile = async () => {
+      try {
+        setProfileLoading(true);
+        // Load profile directly by ID
+        const profileResponse = await apiService.request({
+          tp: 'req:profiles:load',
+          id: selectedProfileId,
+        });
+        if (profileResponse.profile && profileResponse.profile.type === 'pro') {
+          setProfileData(profileResponse.profile);
+        } else {
+          setProfileData(null);
+        }
+      } catch (error) {
+        console.error('Failed to load profile:', error);
+        setProfileData(null);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, [status.value.selectedProfileId, apiService]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Get settings to check if SmartGrind is enabled
+  const { data: settings } = useQuery(
+    'settings-cache',
+    async () => {
+      const response = await fetch('/api/settings');
+      return response.json();
+    },
+    {
+      staleTime: 30000, // Cache for 30 seconds
+      refetchOnWindowFocus: false,
+    },
+  );
+
+  const isSmartGrindEnabled = settings?.smartGrindActive || false;
+  const altRelayFunction = settings?.altRelayFunction !== undefined ? settings.altRelayFunction : 1;
+
+  // Show grind elements if SmartGrind is enabled OR if Alt Relay is set to grind
+  const isGrindAvailable = isSmartGrindEnabled || altRelayFunction === 1; // ALT_RELAY_GRIND = 1
+
+  // If currently in grind mode, always show it even if both SmartGrind is disabled and Alt Relay is not grind
+  // to avoid confusion for users who might be in grind mode when settings change
+  const showGrindTab = isGrindAvailable || mode === 4;
+
+  // Determine if we should show expanded view
+  const shouldExpand =
+    (brew && (active || finished || (brew && !active && !finished))) ||
+    (grind && showGrindTab && (active || finished || (grind && !active && !finished)));
+
   const changeTarget = useCallback(
-    (target) => {
+    target => {
+      const messageType = grind ? 'req:change-grind-target' : 'req:change-brew-target';
       apiService.send({
-        tp: 'req:change-brew-target',
+        tp: messageType,
         target,
       });
     },
-    [apiService]
+    [apiService, grind],
   );
+
   const activate = useCallback(() => {
+    const messageType = grind ? 'req:grind:activate' : 'req:process:activate';
     apiService.send({
-      tp: 'req:process:activate',
+      tp: messageType,
     });
-  }, [apiService]);
+  }, [apiService, grind]);
+
   const deactivate = useCallback(() => {
+    const messageType = grind ? 'req:grind:deactivate' : 'req:process:deactivate';
     apiService.send({
-      tp: 'req:process:deactivate',
+      tp: messageType,
     });
-  }, [apiService]);
+  }, [apiService, grind]);
+
   const clear = useCallback(() => {
     apiService.send({
       tp: 'req:process:clear',
     });
   }, [apiService]);
+
+  const raiseTemp = useCallback(() => {
+    apiService.send({
+      tp: 'req:raise-temp',
+    });
+  }, [apiService]);
+
+  const lowerTemp = useCallback(() => {
+    apiService.send({
+      tp: 'req:lower-temp',
+    });
+  }, [apiService]);
+
+  const raiseTarget = useCallback(() => {
+    const messageType = grind ? 'req:raise-grind-target' : 'req:raise-brew-target';
+    apiService.send({
+      tp: messageType,
+    });
+  }, [apiService, grind]);
+
+  const lowerTarget = useCallback(() => {
+    const messageType = grind ? 'req:lower-grind-target' : 'req:lower-brew-target';
+    apiService.send({
+      tp: messageType,
+    });
+  }, [apiService, grind]);
+
+  const startFlush = useCallback(() => {
+    setIsFlushing(true);
+    apiService
+      .request({
+        tp: 'req:flush:start',
+      })
+      .catch(error => {
+        console.error('Flush start failed:', error);
+        setIsFlushing(false);
+      });
+  }, [apiService]);
+
+  const handleButtonClick = () => {
+    if (active) {
+      deactivate();
+
+      if (isFlushing) {
+        clear();
+        setIsFlushing(false);
+      }
+    } else if (finished) {
+      clear();
+    } else {
+      activate();
+    }
+  };
+
+  const getButtonIcon = () => {
+    if (active) {
+      return faPause;
+    } else if (finished) {
+      return faCheck;
+    }
+    return faPlay;
+  };
+
   return (
-    <>
-      {(active || finished) && brew && <BrewProgress processInfo={processInfo} />}
-      <div className="flex flex-row gap-2 items-center justify-center">
-        <span
-          className="cursor-pointer group flex items-center justify-center rounded-full border border-transparent w-20 h-20 text-center p-0 text-4xl font-semibold text-slate-900 hover:bg-indigo-100 hover:text-indigo-600 active:border-indigo-200 active:bg-indigo-100 sm:gap-2 dark:text-slate-300"
-          onClick={() => (active ? deactivate() : finished ? clear() : activate())}
-        >
-          <i className={active ? 'fa fa-pause' : finished ? 'fa fa-check' : 'fa fa-play'}></i>
-        </span>
+    <div className={`flex h-full min-h-[250px] flex-col justify-between lg:min-h-[350px]`}>
+      <div className='mb-2 flex justify-center'>
+        <div className='bg-base-200/70 flex h-9 w-full shrink-0 gap-0.5 rounded-full p-0.5'>
+          {MODES.filter(m => m.id !== 4 || showGrindTab).map(m => (
+            <ModeTab
+              key={m.id}
+              mode={m}
+              active={mode === m.id}
+              onClick={() => changeMode(m.id)}
+              rotation={m.iconRotation}
+            />
+          ))}
+        </div>
       </div>
-      {brew && !active && !finished && (
-        <div className="flex flex-row gap-2 items-center justify-center">
-          <div className="inline-flex rounded-md">
-            <span className={`mode-selector ${brewTarget === 0 && 'selected'}`} onClick={() => changeTarget(0)}>
-              <i className="fa-solid fa-clock"></i>
+
+      <div className='mt-1 mb-2 flex flex-col items-center justify-between space-y-2 sm:flex-row sm:space-y-0'>
+        <div className='flex flex-row items-center gap-2 text-center text-base sm:text-left sm:text-lg'>
+          <FontAwesomeIcon icon={faThermometerHalf} className='text-base-content/60' />
+          <span className='text-base-content'>
+            {status.value.currentTemperature.toFixed(1) || 0}
+          </span>
+          <span className='text-success font-semibold'>
+            {' '}
+            / {status.value.targetTemperature || 0}°C
+          </span>
+        </div>
+        {status.value.volumetricAvailable && mode !== 0 && (
+          <div className='flex flex-row items-center gap-2 text-center text-base sm:text-left sm:text-lg'>
+            <i className='fa fa-weight-scale text-base-content/60' />
+            {brewTarget && (mode === 1 || mode === 3) && (
+              <>
+                <span className='text-base-content'>
+                  {(status.value.currentWeight ?? 0).toFixed(1)}g
+                </span>
+                <span className='text-success font-semibold'>
+                  {' '}
+                  / {(status.value.targetWeight ?? 0).toFixed(0)}g
+                </span>
+              </>
+            )}
+          </div>
+        )}
+        <div className='flex flex-row items-center gap-2 text-center text-base sm:text-right sm:text-lg'>
+          <FontAwesomeIcon icon={faGauge} className='text-base-content/60' />
+          <span className='text-base-content'>
+            {status.value.currentPressure?.toFixed(1) || 0} /{' '}
+            {status.value.targetPressure?.toFixed(1) || 0} bar
+          </span>
+        </div>
+      </div>
+      {brew && (
+        <div className={`mb-2 text-center ${active && 'hidden lg:contents'}`}>
+          <div className='text-base-content/60 text-sm'>Current Profile</div>
+          <a href='/profiles' className='mb-2 flex items-center justify-center gap-2'>
+            <span className='text-base-content text-xl font-semibold sm:text-2xl'>
+              {status.value.selectedProfile || 'Default'}
             </span>
-            <span className={`mode-selector ${brewTarget === 1 && 'selected'}`} onClick={() => changeTarget(1)}>
-              <i className="fa-solid fa-weight-scale"></i>
-            </span>
+            <FontAwesomeIcon icon={faRectangleList} className='text-base-content/60 text-xl' />
+          </a>
+          {status.value.selectedProfileId && (
+            <div className='mb-2'>
+              {profileLoading && (
+                <div className='flex max-h-20 w-full items-center justify-center'>
+                  <div className='loading loading-spinner loading-xs opacity-60'></div>
+                </div>
+              )}
+              {!profileLoading && profileData && (
+                <ProcessProfileChart
+                  data={profileData}
+                  processInfo={processInfo}
+                  className='max-h-36 w-full'
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {shouldExpand && (
+        <>
+          <div className='flex flex-1 items-center justify-center'>
+            {(active || finished) && brew && <BrewProgress processInfo={processInfo} />}
+            {(active || finished) && grind && showGrindTab && (
+              <GrindProgress processInfo={processInfo} />
+            )}
+            {!brew && !(grind && showGrindTab) && (
+              <div className='space-y-2 text-center'>
+                <div className='text-xl font-bold sm:text-2xl'>
+                  {mode === 0 && 'Standby Mode'}
+                  {mode === 2 && 'Steam Mode'}
+                  {mode === 3 && 'Water Mode'}
+                </div>
+                <div className='text-base-content/60 text-sm'>
+                  {mode === 0 && 'Machine is ready'}
+                  {mode === 3 && 'Start and open steam valve to pull water'}
+                  {mode === 2 &&
+                    (Math.abs(status.value.targetTemperature - status.value.currentTemperature) < 5
+                      ? 'Steam is ready'
+                      : 'Preheating')}
+                </div>
+              </div>
+            )}
+            {grind && showGrindTab && !active && !finished && (
+              <div className='space-y-2 text-center'>
+                <div className='text-xl font-bold sm:text-2xl'>Grind</div>
+                <div className='text-base-content/60 text-sm'>
+                  {isGrindAvailable
+                    ? 'Select grind target to start'
+                    : 'Grind function not available'}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {!shouldExpand && (
+        <div className='flex flex-1 items-center justify-center'>
+          <div className='space-y-2 text-center'>
+            <div className='text-lg font-semibold sm:text-xl'>
+              {mode === 0 && 'Standby'}
+              {mode === 1 && 'Brew'}
+              {mode === 2 && 'Steam'}
+              {mode === 3 && 'Water'}
+              {mode === 4 && showGrindTab && 'Grind'}
+            </div>
+            <div className='text-base-content/60 text-sm'>
+              {mode === 0 && 'Machine is ready'}
+              {mode === 1 && 'Select brew target to start'}
+              {mode === 2 &&
+                (Math.abs(status.value.targetTemperature - status.value.currentTemperature) < 5
+                  ? 'Steam is ready'
+                  : 'Preheating')}
+              {mode === 3 && 'Start and open steam valve to pull water'}
+              {mode === 4 &&
+                showGrindTab &&
+                (isGrindAvailable
+                  ? 'Select grind target to start'
+                  : 'Grind function not available')}
+            </div>
           </div>
         </div>
       )}
-    </>
+
+      <div className='flex flex-col items-center gap-4 py-1'>
+        {grind &&
+          showGrindTab &&
+          !active &&
+          !finished &&
+          isGrindAvailable &&
+          status.value.volumetricAvailable && (
+            <div className='bg-base-300 flex w-full max-w-xs rounded-full p-1'>
+              <button
+                className={`flex-1 cursor-pointer rounded-full px-3 py-1 text-sm transition-all duration-200 lg:py-2 ${
+                  (brew && !brewTarget) || (grind && status.value.grindTarget === 0)
+                    ? 'bg-primary text-primary-content font-medium'
+                    : 'text-base-content/60 hover:text-base-content'
+                }`}
+                onClick={() => changeTarget(0)}
+              >
+                <FontAwesomeIcon icon={faClock} />
+                <span className='ml-1'>Time</span>
+              </button>
+              <button
+                className={`flex-1 cursor-pointer rounded-full px-3 py-1 text-sm transition-all duration-200 lg:py-2 ${
+                  (brew && brewTarget) || (grind && status.value.grindTarget === 1)
+                    ? 'bg-primary text-primary-content font-medium'
+                    : 'text-base-content/60 hover:text-base-content'
+                }`}
+                onClick={() => changeTarget(1)}
+              >
+                <FontAwesomeIcon icon={faWeightScale} />
+                <span className='ml-1'>Weight</span>
+              </button>
+            </div>
+          )}
+        {/* Controls for different modes */}
+        {mode === 2 && (
+          <div className='flex flex-col items-center gap-4 space-y-4'>
+            {/* Temperature adjustment controls for steam mode */}
+            <div className='flex flex-col items-center gap-2'>
+              <div className='text-base-content/60 text-xs font-light tracking-wider'>
+                TEMPERATURE
+              </div>
+              <div className='flex items-center space-x-2'>
+                <Tooltip content='Lower temperature'>
+                  <button
+                    onClick={lowerTemp}
+                    className='btn btn-ghost btn-sm flex h-8 w-8 items-center justify-center rounded-full p-0'
+                  >
+                    <FontAwesomeIcon icon={faMinus} className='h-3 w-3' />
+                  </button>
+                </Tooltip>
+                <div className='text-base-content min-w-[80px] text-center text-lg font-bold'>
+                  {status.value.targetTemperature}°C
+                </div>
+                <Tooltip content='Raise temperature'>
+                  <button
+                    onClick={raiseTemp}
+                    className='btn btn-ghost btn-sm flex h-8 w-8 items-center justify-center rounded-full p-0'
+                  >
+                    <FontAwesomeIcon icon={faPlus} className='h-3 w-3' />
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+          </div>
+        )}
+        {mode === 3 && (
+          <div className='flex flex-col items-center gap-4 space-y-4'>
+            {/* Temperature adjustment controls for water mode */}
+            <div className='flex flex-col items-center gap-2'>
+              <div className='text-base-content/60 text-xs font-light tracking-wider'>
+                TEMPERATURE
+              </div>
+              <div className='flex items-center space-x-2'>
+                <Tooltip content='Lower temperature'>
+                  <button
+                    onClick={lowerTemp}
+                    className='btn btn-ghost btn-sm flex h-8 w-8 items-center justify-center rounded-full p-0'
+                  >
+                    <FontAwesomeIcon icon={faMinus} className='h-3 w-3' />
+                  </button>
+                </Tooltip>
+                <div className='text-base-content min-w-[80px] text-center text-lg font-bold'>
+                  {status.value.targetTemperature}°C
+                </div>
+                <Tooltip content='Raise temperature'>
+                  <button
+                    onClick={raiseTemp}
+                    className='btn btn-ghost btn-sm flex h-8 w-8 items-center justify-center rounded-full p-0'
+                  >
+                    <FontAwesomeIcon icon={faPlus} className='h-3 w-3' />
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+          </div>
+        )}
+        {mode === 4 && showGrindTab && (
+          <div className='flex flex-col items-center gap-4 space-y-4'>
+            {/* Target adjustment controls for grind mode */}
+            {grind && !active && !finished && isGrindAvailable && (
+              <div className='flex flex-col items-center gap-2'>
+                <div className='text-base-content/60 text-xs font-light tracking-wider'>
+                  GRIND TARGET
+                </div>
+                <div className='flex items-center space-x-2'>
+                  <Tooltip content='Decrease target'>
+                    <button
+                      onClick={lowerTarget}
+                      className='btn btn-ghost btn-sm flex h-8 w-8 items-center justify-center rounded-full p-0'
+                    >
+                      <FontAwesomeIcon icon={faMinus} className='h-3 w-3' />
+                    </button>
+                  </Tooltip>
+                  <div className='text-base-content min-w-[80px] text-center text-lg font-bold'>
+                    {status.value.grindTarget === 1 && status.value.volumetricAvailable
+                      ? `${status.value.grindTargetVolume}g`
+                      : `${Math.round(status.value.grindTargetDuration / 1000)}s`}
+                  </div>
+                  <Tooltip content='Increase target'>
+                    <button
+                      onClick={raiseTarget}
+                      className='btn btn-ghost btn-sm flex h-8 w-8 items-center justify-center rounded-full p-0'
+                    >
+                      <FontAwesomeIcon icon={faPlus} className='h-3 w-3' />
+                    </button>
+                  </Tooltip>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Common controls for all modes that need them */}
+        {(mode === 1 || mode === 3 || (mode === 4 && showGrindTab && isGrindAvailable)) && (
+          <div className='flex flex-row items-center gap-4 lg:flex-col'>
+            <Tooltip content={active ? 'Pause' : finished ? 'Finish' : 'Start'}>
+              <button className='btn btn-circle btn-lg btn-primary' onClick={handleButtonClick}>
+                <FontAwesomeIcon icon={getButtonIcon()} className='text-2xl' />
+              </button>
+            </Tooltip>
+
+            {brew && !active && !finished && (
+              <button
+                className='btn text-base-content/60 hover:text-base-content rounded-full text-sm transition-colors duration-200'
+                onClick={startFlush}
+                aria-label='Flush water'
+              >
+                <FontAwesomeIcon icon={faTint} />
+                Flush
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
+};
+
+ProcessControls.propTypes = {
+  brew: PropTypes.bool.isRequired,
+  mode: PropTypes.oneOf([0, 1, 2, 3, 4]).isRequired,
+  changeMode: PropTypes.func.isRequired,
 };
 
 export default ProcessControls;

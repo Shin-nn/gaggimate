@@ -48,17 +48,30 @@ void GitHubOTA::checkForUpdates() {
         ESP_LOGI(TAG, "base_url %s\n", _latest_url.c_str());
 
         auto last_slash = _latest_url.lastIndexOf('/', _latest_url.length() - 2);
-        auto semver_str = _latest_url.substring(last_slash + 2);
+        auto semver_str = _latest_url.substring(last_slash + 1);
         semver_str.replace("/", "");
+        if (semver_str.substring(0, 1) != "v") {
+            ESP_LOGW(TAG, "not a valid version URL");
+            return;
+        }
+        semver_str = semver_str.substring(1);
         ESP_LOGI(TAG, "semver_str %s\n", semver_str.c_str());
         _latest_version_string = semver_str;
+        semver_free(&_latest_version);
         _latest_version = from_string(semver_str.c_str());
     } else {
         _latest_url = _release_url + "/";
         _latest_url.replace("tag", "download");
         String version = get_updated_version_via_txt_file(_wifi_client, _latest_url);
+
+        if (version.length() == 0) {
+            ESP_LOGW(TAG, "version.txt did not return a valid version string");
+            return;
+        }
+
         version = version.substring(1);
         _latest_version_string = version;
+        semver_free(&_latest_version);
         _latest_version = from_string(version.c_str());
     }
 }
@@ -75,12 +88,15 @@ bool GitHubOTA::isUpdateAvailable(bool controller) const {
 void GitHubOTA::update(bool controller, bool display) {
     const char *TAG = "update";
 
+    bool updateExecuted = false;
+
     if (controller && update_required(_latest_version, _controller_version)) {
         ESP_LOGI(TAG, "Controller update is required, running firmware update.");
         this->phase = PHASE_CONTROLLER_FW;
         this->_phase_callback(PHASE_CONTROLLER_FW);
         _controller_ota.update(_wifi_client, _latest_url + _controller_firmware_name);
         ESP_LOGI(TAG, "Controller update successful. Restarting...\n");
+        updateExecuted = true;
     }
 
     if (display && update_required(_latest_version, _version)) {
@@ -106,11 +122,15 @@ void GitHubOTA::update(bool controller, bool display) {
         ESP_LOGI(TAG, "Update successful. Restarting...\n");
         this->phase = PHASE_FINISHED;
         this->_phase_callback(PHASE_FINISHED);
-        delay(1000);
-        ESP.restart();
+        updateExecuted = true;
     }
     this->phase = PHASE_FINISHED;
     this->_phase_callback(PHASE_FINISHED);
+
+    if (updateExecuted) {
+        delay(1000);
+        ESP.restart();
+    }
 
     ESP_LOGI(TAG, "No updates found\n");
 }
@@ -137,5 +157,6 @@ HTTPUpdateResult GitHubOTA::update_filesystem(const String &url) {
 }
 
 void GitHubOTA::setControllerVersion(const String &controller_version) {
+    semver_free(&_controller_version);
     _controller_version = from_string(controller_version.substring(1).c_str());
 }

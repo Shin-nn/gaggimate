@@ -79,7 +79,10 @@ export default class ApiService {
     }
 
     // Calculate delay with exponential backoff
-    const delay = Math.min(this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
+    const delay = Math.min(
+      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts),
+      this.maxReconnectDelay,
+    );
 
     console.log(`Scheduling reconnect attempt ${this.reconnectAttempts + 1} in ${delay}ms`);
 
@@ -90,7 +93,12 @@ export default class ApiService {
   }
 
   _onMessage(event) {
-    const message = JSON.parse(event.data);
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return; // Discard malformed messages to avoid crashing the WS handler.
+    }
     const listeners = Object.values(this.listeners[message.tp] || {});
     if (message.tp === 'evt:status') {
       this._onStatus(message);
@@ -117,10 +125,13 @@ export default class ApiService {
     const rid = uuidv4();
     const message = { ...data, rid };
     return new Promise((resolve, reject) => {
+      let timeoutId;
+
       // Create a listener for the response with matching rid
-      const listenerId = this.on(returnType, (response) => {
+      const listenerId = this.on(returnType, response => {
         if (response.rid === rid) {
-          // Clean up the listener
+          // Clean up the listener and cancel the timeout to free the closure.
+          clearTimeout(timeoutId);
           this.off(returnType, listenerId);
           resolve(response);
         }
@@ -129,8 +140,8 @@ export default class ApiService {
       // Send the request
       this.send(message);
 
-      // Optional: Add timeout
-      setTimeout(() => {
+      // Timeout: reject if no matching response arrives within 30 seconds
+      timeoutId = setTimeout(() => {
         this.off(returnType, listenerId);
         reject(new Error(`Request ${data.tp} timed out`));
       }, 30000); // 30 second timeout
@@ -156,13 +167,27 @@ export default class ApiService {
       targetTemperature: message.tt,
       currentPressure: message.pr,
       targetPressure: message.pt,
+      targetWeight: message.tw || 0,
+      activeTargetWeight: (message?.process?.a && message.tw) || 0,
       currentFlow: message.fl,
       currentWeight: message.cw,
       mode: message.m,
       selectedProfile: message.p,
-      brewTarget: message.bt || 0,
+      selectedProfileId: message.puid,
+      brewTarget: !!message.bt,
+      brewTargetDuration: message.btd || 0,
+      volumetricAvailable: message.bta || false,
+      grindTargetDuration: message.gtd || 0,
+      grindTargetVolume: message.gtv || 0,
+      grindTarget: message.gt || 0,
+      grindActive: message.gact || false,
+      currentWeight: message.cw || 0,
+      bluetoothConnected: message.bc || false,
       process: message.process || null,
       timestamp: new Date(),
+      rssi: message.rssi || 0,
+      lat: message.lat || 0,
+      tofDistance: message.tof || 0,
     };
     const historyEntry = { ...newStatus };
     delete historyEntry.process;
@@ -196,6 +221,13 @@ export const machine = signal({
     targetTemperature: 0,
     mode: 0,
     selectedProfile: '',
+    selectedProfileId: null,
+    brewTargetDuration: 0,
+    brewTargetVolume: 0,
+    grindTargetDuration: 0,
+    grindTargetVolume: 0,
+    grindTarget: 0,
+    grindActive: false,
     process: null,
   },
   capabilities: {

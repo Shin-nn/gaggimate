@@ -1,32 +1,28 @@
 #include "Settings.h"
 
+#include <algorithm>
 #include <utility>
 
 Settings::Settings() {
     preferences.begin(PREFERENCES_KEY, true);
     startupMode = preferences.getInt("sm", MODE_STANDBY);
-    targetBrewTemp = preferences.getInt("tb", 90);
     targetSteamTemp = preferences.getInt("ts", 145);
     targetWaterTemp = preferences.getInt("tw", 80);
-    targetDuration = preferences.getInt("td", 25000);
-    targetVolume = preferences.getInt("tv", 36);
     targetGrindVolume = preferences.getDouble("tgv", 18.0);
     targetGrindDuration = preferences.getInt("tgd", 25000);
-    brewDelay = preferences.getDouble("del_br", 1000.0);
+    brewDelay = preferences.getDouble("del_br", 800.0);
     grindDelay = preferences.getDouble("del_gd", 1000.0);
     delayAdjust = preferences.getBool("del_ad", true);
     temperatureOffset = preferences.getInt("to", DEFAULT_TEMPERATURE_OFFSET);
     pressureScaling = preferences.getFloat("ps", DEFAULT_PRESSURE_SCALING);
     pid = preferences.getString("pid", DEFAULT_PID);
+    pumpModelCoeffs = preferences.getString("pmc", DEFAULT_PUMP_MODEL_COEFFS);
     wifiSsid = preferences.getString("ws", "");
     wifiPassword = preferences.getString("wp", "");
     mdnsName = preferences.getString("mn", DEFAULT_MDNS_NAME);
     homekit = preferences.getBool("hk", false);
     volumetricTarget = preferences.getBool("vt", false);
     otaChannel = preferences.getString("oc", DEFAULT_OTA_CHANNEL);
-    infusePumpTime = preferences.getInt("ipt", 0);
-    infuseBloomTime = preferences.getInt("ibt", 0);
-    pressurizeTime = preferences.getInt("pt", 0);
     savedScale = preferences.getString("ssc", "");
     momentaryButtons = preferences.getBool("mb", false);
     boilerFillActive = preferences.getBool("bf_a", false);
@@ -39,16 +35,59 @@ Settings::Settings() {
     homeAssistant = preferences.getBool("ha_a", false);
     homeAssistantIP = preferences.getString("ha_i", "");
     homeAssistantPort = preferences.getInt("ha_p", 1883);
+    homeAssistantTopic = preferences.getString("ha_t", DEFAULT_HOME_ASSISTANT_TOPIC);
     homeAssistantUser = preferences.getString("ha_u", "");
     homeAssistantPassword = preferences.getString("ha_pw", "");
     standbyTimeout = preferences.getInt("sbt", DEFAULT_STANDBY_TIMEOUT_MS);
     timezone = preferences.getString("tz", DEFAULT_TIMEZONE);
     clock24hFormat = preferences.getBool("clk_24h", true);
     selectedProfile = preferences.getString("sp", "");
-    profilesMigrated = preferences.getBool("pm", false);
+    startupProfile = preferences.getString("sup", ""); // Empty = last used profile
     favoritedProfiles = explode(preferences.getString("fp", ""), ',');
+    profileOrder = explode(preferences.getString("po", ""), ',');
     steamPumpPercentage = preferences.getFloat("spp", DEFAULT_STEAM_PUMP_PERCENTAGE);
+    steamPumpCutoff = preferences.getFloat("spc", DEFAULT_STEAM_PUMP_CUTOFF);
     historyIndex = preferences.getInt("hi", 0);
+    autowakeupEnabled = preferences.getBool("ab_en", false);
+
+    // Load schedule format: "time1|days1;time2|days2" where days is 7-bit string (e.g., "1111100" for weekdays only)
+    String schedulesStr = preferences.getString("ab_schedules", "");
+    autowakeupSchedules.clear();
+
+    if (schedulesStr.length() > 0) {
+        int start = 0;
+        int end = schedulesStr.indexOf(';');
+
+        while (end != -1 || start < schedulesStr.length()) {
+            String scheduleStr = (end != -1) ? schedulesStr.substring(start, end) : schedulesStr.substring(start);
+
+            int pipePos = scheduleStr.indexOf('|');
+            if (pipePos != -1) {
+                String timeStr = scheduleStr.substring(0, pipePos);
+                String daysStr = scheduleStr.substring(pipePos + 1);
+
+                AutoWakeupSchedule schedule;
+                schedule.time = timeStr;
+
+                if (daysStr.length() == 7) {
+                    for (int i = 0; i < 7; i++) {
+                        schedule.days[i] = (daysStr.charAt(i) == '1');
+                    }
+                }
+
+                autowakeupSchedules.push_back(schedule);
+            }
+
+            if (end == -1)
+                break;
+            start = end + 1;
+            end = schedulesStr.indexOf(';', start);
+        }
+    }
+
+    if (autowakeupSchedules.empty()) {
+        autowakeupSchedules.emplace_back(AutoWakeupSchedule("07:00"));
+    }
 
     // Display settings
     mainBrightness = preferences.getInt("main_b", 16);
@@ -59,12 +98,16 @@ Settings::Settings() {
 
     // Sunrise settings
     sunriseR = preferences.getInt("sr_r", 0);
-    sunriseG = preferences.getInt("sr_g", 0);
-    sunriseB = preferences.getInt("sr_b", 255);
-    sunriseW = preferences.getInt("sr_w", 50);
-    sunriseExtBrightness = preferences.getInt("sr_exb", 255);
-    emptyTankDistance = preferences.getInt("sr_ed", 200);
-    fullTankDistance = preferences.getInt("sr_fd", 50);
+    sunriseG = preferences.getInt("sr_g", 250);
+    sunriseB = preferences.getInt("sr_b", 150);
+    sunriseW = preferences.getInt("sr_w", 255);
+    sunriseExtBrightness = preferences.getInt("sr_exb", 75);
+    emptyTankDistance = preferences.getInt("sr_ed", 210);
+    fullTankDistance = preferences.getInt("sr_fd", 30);
+    altRelayFunction = preferences.getInt("alt_relay", ALT_RELAY_GRIND);
+
+    String buttonBehaviorStr = preferences.getString("btnb", "brew,steam,water");
+    buttonBehavior = explode(buttonBehaviorStr, ',');
 
     // Hardware scale settings
     scaleFactor1 = preferences.getFloat("hs_sf1", 0.0f);
@@ -88,11 +131,6 @@ void Settings::save(bool noDelay) {
     dirty = true;
 }
 
-void Settings::setTargetBrewTemp(const int target_brew_temp) {
-    targetBrewTemp = target_brew_temp;
-    save();
-}
-
 void Settings::setTargetSteamTemp(const int target_steam_temp) {
     targetSteamTemp = target_steam_temp;
     save();
@@ -110,16 +148,6 @@ void Settings::setTemperatureOffset(const int temperature_offset) {
 
 void Settings::setPressureScaling(const float pressure_scaling) {
     pressureScaling = pressure_scaling;
-    save();
-}
-
-void Settings::setTargetDuration(const int target_duration) {
-    targetDuration = target_duration;
-    save();
-}
-
-void Settings::setTargetVolume(int target_volume) {
-    targetVolume = target_volume;
     save();
 }
 
@@ -158,23 +186,13 @@ void Settings::setStandbyTimeout(int standby_timeout) {
     save();
 }
 
-void Settings::setInfuseBloomTime(int infuse_bloom_time) {
-    infuseBloomTime = infuse_bloom_time;
-    save();
-}
-
-void Settings::setInfusePumpTime(int infuse_pump_time) {
-    infusePumpTime = infuse_pump_time;
-    save();
-}
-
-void Settings::setPressurizeTime(int pressurize_time) {
-    pressurizeTime = pressurize_time;
-    save();
-}
-
 void Settings::setPid(const String &pid) {
     this->pid = pid;
+    save();
+}
+
+void Settings::setPumpModelCoeffs(const String &pumpModelCoeffs) {
+    this->pumpModelCoeffs = pumpModelCoeffs;
     save();
 }
 
@@ -257,6 +275,10 @@ void Settings::setHomeAssistantPort(const int homeAssistantPort) {
     this->homeAssistantPort = homeAssistantPort;
     save();
 }
+void Settings::setHomeAssistantTopic(const String &homeAssistantTopic) {
+    this->homeAssistantTopic = homeAssistantTopic;
+    save();
+}
 void Settings::setHomeAssistantUser(const String &homeAssistantUser) {
     this->homeAssistantUser = homeAssistantUser;
     save();
@@ -286,8 +308,8 @@ void Settings::setSelectedProfile(String selected_profile) {
     save();
 }
 
-void Settings::setProfilesMigrated(bool profiles_migrated) {
-    profilesMigrated = profiles_migrated;
+void Settings::setStartupProfile(String startup_profile) {
+    this->startupProfile = std::move(startup_profile);
     save();
 }
 
@@ -297,6 +319,9 @@ void Settings::setFavoritedProfiles(std::vector<String> favorited_profiles) {
 }
 
 void Settings::addFavoritedProfile(String profile) {
+    if (std::find(favoritedProfiles.begin(), favoritedProfiles.end(), profile) != favoritedProfiles.end()) {
+        return;
+    }
     favoritedProfiles.emplace_back(profile);
     save();
 }
@@ -304,6 +329,21 @@ void Settings::addFavoritedProfile(String profile) {
 void Settings::removeFavoritedProfile(String profile) {
     favoritedProfiles.erase(std::remove(favoritedProfiles.begin(), favoritedProfiles.end(), profile), favoritedProfiles.end());
     favoritedProfiles.shrink_to_fit();
+    save();
+}
+
+void Settings::setProfileOrder(std::vector<String> profile_order) {
+    std::vector<String> cleaned;
+    cleaned.reserve(profile_order.size());
+    for (auto &id : profile_order) {
+        if (id.isEmpty())
+            continue;
+        if (std::find(cleaned.begin(), cleaned.end(), id) == cleaned.end()) {
+            cleaned.emplace_back(std::move(id));
+        }
+    }
+
+    profileOrder = std::move(cleaned);
     save();
 }
 
@@ -329,6 +369,11 @@ void Settings::setWifiApTimeout(int timeout) {
 
 void Settings::setSteamPumpPercentage(float steam_pump_percentage) {
     steamPumpPercentage = steam_pump_percentage;
+    save();
+}
+
+void Settings::setSteamPumpCutoff(float steam_pump_cutoff) {
+    steamPumpCutoff = steam_pump_cutoff;
     save();
 }
 
@@ -377,6 +422,31 @@ void Settings::setFullTankDistance(int full_tank_distance) {
     save();
 }
 
+void Settings::setAltRelayFunction(int alt_relay_function) { altRelayFunction = alt_relay_function; }
+
+void Settings::setAutoWakeupEnabled(bool enabled) {
+    autowakeupEnabled = enabled;
+    save();
+}
+
+void Settings::setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules) {
+    autowakeupSchedules = schedules;
+    save();
+}
+
+void Settings::setButtonBehavior(int index, String behavior) {
+    if (index < 0 || index >= buttonBehavior.size()) {
+        return;
+    }
+    buttonBehavior[index] = std::move(behavior);
+    save();
+}
+
+void Settings::setButtonBehaviorList(const std::vector<String> &behavior_list) {
+    buttonBehavior = behavior_list;
+    save();
+}
+
 void Settings::setScaleFactors(float scale_factor_1, float scale_factor_2) {
     scaleFactor1 = scale_factor_1;
     scaleFactor2 = scale_factor_2;
@@ -391,11 +461,8 @@ void Settings::doSave() {
     ESP_LOGI("Settings", "Saving settings");
     preferences.begin(PREFERENCES_KEY, false);
     preferences.putInt("sm", startupMode);
-    preferences.putInt("tb", targetBrewTemp);
     preferences.putInt("ts", targetSteamTemp);
     preferences.putInt("tw", targetWaterTemp);
-    preferences.putInt("td", targetDuration);
-    preferences.putInt("tv", targetVolume);
     preferences.putDouble("tgv", targetGrindVolume);
     preferences.putInt("tgd", targetGrindDuration);
     preferences.putDouble("del_br", brewDelay);
@@ -404,15 +471,13 @@ void Settings::doSave() {
     preferences.putInt("to", temperatureOffset);
     preferences.putFloat("ps", pressureScaling);
     preferences.putString("pid", pid);
+    preferences.putString("pmc", pumpModelCoeffs);
     preferences.putString("ws", wifiSsid);
     preferences.putString("wp", wifiPassword);
     preferences.putString("mn", mdnsName);
     preferences.putBool("hk", homekit);
     preferences.putBool("vt", volumetricTarget);
     preferences.putString("oc", otaChannel);
-    preferences.putInt("ipt", infusePumpTime);
-    preferences.putInt("ibt", infuseBloomTime);
-    preferences.putInt("pt", pressurizeTime);
     preferences.putString("ssc", savedScale);
     preferences.putBool("bf_a", boilerFillActive);
     preferences.putInt("bf_su", startupFillTime);
@@ -424,17 +489,35 @@ void Settings::doSave() {
     preferences.putBool("ha_a", homeAssistant);
     preferences.putString("ha_i", homeAssistantIP);
     preferences.putInt("ha_p", homeAssistantPort);
+    preferences.putString("ha_t", homeAssistantTopic);
     preferences.putString("ha_u", homeAssistantUser);
     preferences.putString("ha_pw", homeAssistantPassword);
     preferences.putString("tz", timezone);
     preferences.putBool("clk_24h", clock24hFormat);
     preferences.putString("sp", selectedProfile);
+    preferences.putString("sup", startupProfile);
     preferences.putInt("sbt", standbyTimeout);
-    preferences.putBool("pm", profilesMigrated);
-    preferences.putInt("mb", momentaryButtons);
+    preferences.putBool("mb", momentaryButtons);
     preferences.putString("fp", implode(favoritedProfiles, ","));
+    preferences.putString("po", implode(profileOrder, ","));
     preferences.putFloat("spp", steamPumpPercentage);
+    preferences.putFloat("spc", steamPumpCutoff);
     preferences.putInt("hi", historyIndex);
+    preferences.putBool("ab_en", autowakeupEnabled);
+
+    // Save schedule format
+    String schedulesForSave = "";
+    for (size_t i = 0; i < autowakeupSchedules.size(); i++) {
+        if (i > 0)
+            schedulesForSave += ";";
+        schedulesForSave += autowakeupSchedules[i].time + "|";
+
+        // Convert days array to 7-bit string
+        for (int j = 0; j < 7; j++) {
+            schedulesForSave += autowakeupSchedules[i].days[j] ? "1" : "0";
+        }
+    }
+    preferences.putString("ab_schedules", schedulesForSave);
 
     // Display settings
     preferences.putInt("main_b", mainBrightness);
@@ -451,6 +534,8 @@ void Settings::doSave() {
     preferences.putInt("sr_exb", sunriseExtBrightness);
     preferences.putInt("sr_ed", emptyTankDistance);
     preferences.putInt("sr_fd", fullTankDistance);
+    preferences.putInt("alt_relay", altRelayFunction);
+    preferences.putString("btnb", implode(buttonBehavior, ","));
 
     // Hardware scale settings
     preferences.putFloat("hs_sf1", scaleFactor1);
@@ -459,7 +544,7 @@ void Settings::doSave() {
     preferences.end();
 }
 
-void Settings::loopTask(void *arg) {
+[[noreturn]] void Settings::loopTask(void *arg) {
     auto *settings = static_cast<Settings *>(arg);
     while (true) {
         settings->doSave();

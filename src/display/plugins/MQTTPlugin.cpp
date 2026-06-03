@@ -1,6 +1,11 @@
 #include "MQTTPlugin.h"
 #include "../core/Controller.h"
+#include <ArduinoJson.h>
 #include <ctime>
+#include <display/util/PsramAllocator.h>
+#include <esp_log.h>
+
+const String LOG_TAG = F("MQTTPlugin");
 
 bool MQTTPlugin::connect(Controller *controller) {
     const Settings settings = controller->getSettings();
@@ -11,17 +16,96 @@ bool MQTTPlugin::connect(Controller *controller) {
     const String haPassword = settings.getHomeAssistantPassword();
 
     client.begin(ip.c_str(), haPort, net);
-    printf("Connecting to MQTT");
+    client.setKeepAlive(10);
+    ESP_LOGI(LOG_TAG.c_str(), "Connecting to %s:%d", ip.c_str(), haPort);
     for (int i = 0; i < MQTT_CONNECTION_RETRIES; i++) {
+        ESP_LOGD(LOG_TAG.c_str(), "Attempt (%d/%d)", i + 1, MQTT_CONNECTION_RETRIES);
         if (client.connect(clientId.c_str(), haUser.c_str(), haPassword.c_str())) {
-            printf("\n");
+            ESP_LOGI(LOG_TAG.c_str(), "Successfully connected");
             return true;
         }
-        printf(".");
         delay(MQTT_CONNECTION_DELAY);
     }
-    printf("\nConnection to MQTT failed.\n");
+    ESP_LOGW(LOG_TAG.c_str(), "Connection failed");
     return false;
+}
+
+void MQTTPlugin::publishDiscovery(Controller *controller) {
+    if (!client.connected())
+        return;
+    const Settings settings = controller->getSettings();
+    const String haTopic = settings.getHomeAssistantTopic();
+    String mac = WiFi.macAddress();
+    mac.replace(":", "_");
+    const char *cmac = mac.c_str();
+
+    JsonDocument device(&psramAllocator);
+    JsonDocument origin(&psramAllocator);
+    JsonDocument components(&psramAllocator);
+
+    // Device information
+    device["ids"] = cmac;
+    device["name"] = "GaggiMate";
+    device["mf"] = "GaggiMate";
+    device["mdl"] = "GaggiMate";
+    device["sn"] = cmac;
+    device["sw"] = controller->getSystemInfo().version;
+    device["hw"] = controller->getSystemInfo().hardware;
+
+    // Origin information
+    origin["name"] = "GaggiMate";
+    origin["sw"] = controller->getSystemInfo().version;
+    origin["url"] = "https://gaggimate.eu/";
+
+    // Components information
+    JsonDocument cmps(&psramAllocator);
+    JsonDocument boilerTemperature(&psramAllocator);
+    JsonDocument boilerTargetTemperature(&psramAllocator);
+    JsonDocument mode(&psramAllocator);
+
+    boilerTemperature["name"] = "Boiler Temperature";
+    boilerTemperature["p"] = "sensor";
+    boilerTemperature["device_class"] = "temperature";
+    boilerTemperature["unit_of_measurement"] = "°C";
+    boilerTemperature["value_template"] = "{{ value_json.temperature | round(2) }}";
+    boilerTemperature["unique_id"] = "boiler0Tmp";
+    boilerTemperature["state_topic"] = "gaggimate/" + String(cmac) + "/boilers/0/temperature";
+
+    boilerTargetTemperature["name"] = "Boiler Target Temperature";
+    boilerTargetTemperature["p"] = "sensor";
+    boilerTargetTemperature["device_class"] = "temperature";
+    boilerTargetTemperature["unit_of_measurement"] = "°C";
+    boilerTargetTemperature["value_template"] = "{{ value_json.temperature | round(2) }}";
+    boilerTargetTemperature["unique_id"] = "boiler0TargetTmp";
+    boilerTargetTemperature["state_topic"] = "gaggimate/" + String(cmac) + "/boilers/0/targetTemperature";
+
+    mode["name"] = "Mode";
+    mode["p"] = "text";
+    mode["device_class"] = "text";
+    mode["value_template"] = "{{ value_json.mode_str }}";
+    mode["unique_id"] = "mode";
+    mode["state_topic"] = "gaggimate/" + String(cmac) + "/controller/mode";
+
+    cmps["boiler"] = boilerTemperature;
+    cmps["boiler_target"] = boilerTargetTemperature;
+    cmps["mode"] = mode;
+
+    // Prepare the payload for Home Assistant discovery
+    JsonDocument payload(&psramAllocator);
+    payload["dev"] = device;
+    payload["o"] = origin;
+    payload["cmps"] = cmps;
+    payload["state_topic"] = "gaggimate/" + String(cmac) + "/state";
+    payload["qos"] = 2;
+
+    char publishTopic[80];
+    snprintf(publishTopic, sizeof(publishTopic), "%s/device/%s/config", haTopic.c_str(), cmac);
+
+    String payloadStr;
+    serializeJson(payload, payloadStr);
+
+    ESP_LOGD(LOG_TAG.c_str(), "Publishing discovery %s: %s", publishTopic, payloadStr.c_str());
+    client.publish(publishTopic, payloadStr);
 }
 
 void MQTTPlugin::publish(const std::string &topic, const std::string &message) {
@@ -32,6 +116,8 @@ void MQTTPlugin::publish(const std::string &topic, const std::string &message) {
     const char *cmac = mac.c_str();
     char publishTopic[80];
     snprintf(publishTopic, sizeof(publishTopic), "gaggimate/%s/%s", cmac, topic.c_str());
+
+    ESP_LOGD(LOG_TAG.c_str(), "Publishing %s: %s", publishTopic, message.c_str());
     client.publish(publishTopic, message.c_str());
 }
 void MQTTPlugin::publishBrewState(const char *state) {
@@ -45,15 +131,7 @@ void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
     pluginManager->on("controller:wifi:connect", [this, controller](const Event &) {
         if (!connect(controller))
             return;
-        char json[500];
-        String mac = WiFi.macAddress();
-        mac.replace(":", "_");
-        const char *cmac = mac.c_str();
-        snprintf(
-            json, sizeof(json),
-            R"***({"dev":{"ids":"%s","name":"GaggiMate","mf":"GaggiMate","mdl":"GaggiMate","sw":"1.0","sn":"%s","hw":"1.0"},"o":{"name":"GaggiMate","sw":"v0.3.0","url":"https://gaggimate.eu/"},"cmps":{"boiler":{"p":"sensor","device_class":"temperature","unit_of_measurement":"°C","value_template":"{{ value_json.temperature }}","unique_id":"boiler0Tmp","state_topic":"gaggimate/%s/boilers/0/temperature"}},"state_topic":"gaggimate/%s/state","qos":2})***",
-            cmac, cmac, cmac, cmac);
-        publish("config", json);
+        publishDiscovery(controller);
     });
 
     pluginManager->on("boiler:currentTemperature:change", [this](Event const &event) {
@@ -71,7 +149,7 @@ void MQTTPlugin::setup(Controller *controller, PluginManager *pluginManager) {
         if (!client.connected())
             return;
         char json[50];
-        const float temp = event.getInt("value");
+        const float temp = event.getFloat("value");
         snprintf(json, sizeof(json), R"***({"temperature":%02f})***", temp);
         publish("boilers/0/targetTemperature", json);
     });

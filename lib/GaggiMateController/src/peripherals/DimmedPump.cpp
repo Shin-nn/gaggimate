@@ -19,7 +19,8 @@ void DimmedPump::setup() {
 void DimmedPump::loop() {
     _currentPressure = _pressureSensor->getRawPressure();
     updatePower();
-    _currentFlow = 0.1f * (_pressureController.getPumFlowRate() * 1000000.0f) + 0.9f * _currentFlow;
+    // _currentFlow = 0.1f * _pressureController.getPumpFlowRate() + 0.9f * _currentFlow;
+    _currentFlow = _pressureController.getPumpFlowRate();
 }
 
 void DimmedPump::setPower(float setpoint) {
@@ -34,11 +35,13 @@ void DimmedPump::setPower(float setpoint) {
     _psm.set(static_cast<int>(_power));
 }
 
-float DimmedPump::getCoffeeVolume() { return _pressureController.getcoffeeOutputEstimate(); }
+float DimmedPump::getCoffeeVolume() { return _pressureController.getCoffeeOutputEstimate(); }
 
 float DimmedPump::getPumpFlow() { return _currentFlow; }
 
 float DimmedPump::getPuckFlow() { return _pressureController.getCoffeeFlowRate(); }
+
+float DimmedPump::getPuckResistance() { return _pressureController.getPuckResistance(); }
 
 void DimmedPump::tare() {
     _pressureController.tare();
@@ -77,3 +80,11 @@ void DimmedPump::setPressureTarget(float targetPressure, float flowLimit) {
 }
 
 void DimmedPump::setValveState(bool open) { _valveStatus = open; }
+
+void DimmedPump::setPumpFlowCoeff(float oneBarFlow, float nineBarFlow) {
+    _pressureController.setPumpFlowCoeff(oneBarFlow, nineBarFlow);
+}
+
+void DimmedPump::setPumpFlowPolyCoeffs(float a, float b, float c, float d) {
+    _pressureController.setPumpFlowPolyCoeffs(a, b, c, d);
+}

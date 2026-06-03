@@ -12,24 +12,28 @@
 class Controller;
 
 constexpr int RERENDER_INTERVAL_IDLE = 2500;
-constexpr int RERENDER_INTERVAL_ACTIVE = 250;
+constexpr int RERENDER_INTERVAL_ACTIVE = 100;
 
 constexpr int TEMP_HISTORY_INTERVAL = 250;
 constexpr int TEMP_HISTORY_LENGTH = 20 * 1000 / TEMP_HISTORY_INTERVAL;
 
 int16_t calculate_angle(int set_temp, int range, int offset);
 
+enum class BrewScreenState { Brew, Settings };
+
 class DefaultUI {
   public:
-    DefaultUI(Controller *controller, PluginManager *pluginManager);
+    DefaultUI(Controller *controller, Driver *driver, PluginManager *pluginManager);
 
     // Default work methods
     void init();
     void loop();
+    void loopProfiles();
 
     // Interface methods
     void changeScreen(lv_obj_t **screen, void (*target_init)(void));
 
+    void changeBrewScreenMode(BrewScreenState state);
     void onProfileSwitch();
     void onNextProfile();
     void onPreviousProfile();
@@ -40,9 +44,17 @@ class DefaultUI {
         }
     };
 
+    void onVolumetricDelete();
+
     void markDirty() { rerender = true; }
+    void markProfileDirty() { profileDirty = true; }
+    void markProfileClean() { profileDirty = false; }
 
     void applyTheme();
+
+    bool isTaskHealthy() const {
+        return is_task_healthy(eTaskGetState(taskHandle)) && is_task_healthy(eTaskGetState(profileTaskHandle));
+    }
 
   private:
     void setupPanel();
@@ -68,6 +80,7 @@ class DefaultUI {
     void updateTempHistory();
     void updateTempStableFlag();
     void adjustHeatingIndicator(lv_obj_t *contentPanel);
+    void reloadProfiles();
 
     Driver *panelDriver = nullptr;
     Controller *controller;
@@ -81,11 +94,22 @@ class DefaultUI {
     int updateActive = false;
     int apActive = false;
     int error = false;
+    int protocolMismatch = false;
     int autotuning = false;
+    int waitingForController = false;
     int volumetricAvailable = false;
+    int bluetoothScales = false;
     int volumetricMode = false;
+    int brewVolumetric = false;
+    int profileVolumetric = false;
     int grindActive = false;
     int active = false;
+    int smartGrindActive = false;
+    int grindAvailable = false;
+    int initialized = false;
+
+    // Seasonal flags
+    int christmasMode = false;
 
     bool rerender = false;
     unsigned long lastRender = 0;
@@ -93,31 +117,36 @@ class DefaultUI {
     int mode = MODE_STANDBY;
     int currentTemp = 0;
     int targetTemp = 0;
-    int targetDuration = 0;
-    int targetVolume = 0;
+    float targetDuration = 0;
+    float targetVolume = 0;
     int grindDuration = 0;
     float grindVolume = 0.0f;
     int pressureAvailable = 0;
     float pressure = 0.0f;
     int pressureScaling = DEFAULT_PRESSURE_SCALING;
     int heatingFlash = 0;
+    double bluetoothWeight = 0.0;
+    BrewScreenState brewScreenState = BrewScreenState::Brew;
 
+    int profileDirty = 0;
     int currentProfileIdx;
-    String currentProfileId;
-    Profile currentProfileChoice{};
-    std::vector<String> favoritedProfiles;
-    int currentThemeMode = 0; // Track current theme mode
+    int profileLoaded = 0;
+    std::vector<String> favoritedProfileIds;
+    std::vector<Profile> favoritedProfiles;
+    int currentThemeMode = -1; // Force applyTheme on first loop
 
     // Screen change
-    lv_obj_t **targetScreen = &ui_InitScreen;
-    lv_obj_t *currentScreen = ui_InitScreen;
-    void (*targetScreenInit)(void) = &ui_InitScreen_screen_init;
+    lv_obj_t **targetScreen = &ui_StandbyScreen;
+    lv_obj_t *currentScreen = ui_StandbyScreen;
+    void (*targetScreenInit)(void) = &ui_StandbyScreen_screen_init;
 
     // Standby brightness control
     unsigned long standbyEnterTime = 0;
 
     xTaskHandle taskHandle;
     static void loopTask(void *arg);
+    xTaskHandle profileTaskHandle;
+    static void profileLoopTask(void *arg);
 };
 
 #endif // DEFAULTUI_H

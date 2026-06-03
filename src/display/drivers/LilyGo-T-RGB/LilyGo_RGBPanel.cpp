@@ -43,18 +43,7 @@ bool LilyGo_RGBPanel::begin(LilyGo_RGBPanel_Color_Order order) {
     pinMode(BOARD_TFT_BL, OUTPUT);
     digitalWrite(BOARD_TFT_BL, LOW);
 
-    // Initialize the XL9555 expansion chip
-    if (!extension.init(Wire, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
-        Serial.println(F("External GPIO expansion chip does not exist."));
-        assert(false);
-    }
-
-    /**
-     * * The power enable is connected to the XL9555 expansion chip GPIO.
-     * * It must be turned on and can only be started when using a battery.
-     */
-    extension.pinMode(power_enable, OUTPUT);
-    extension.digitalWrite(power_enable, HIGH);
+    initExtension();
 
     if (!initTouch()) {
         Serial.println(F("Touch chip not found."));
@@ -67,13 +56,36 @@ bool LilyGo_RGBPanel::begin(LilyGo_RGBPanel_Color_Order order) {
     return true;
 }
 
+void LilyGo_RGBPanel::initExtension() {
+    if (_extension_initialized) {
+        return;
+    }
+    // Initialize the XL9555 expansion chip
+    if (!extension.init(Wire, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
+        Serial.println(F("External GPIO expansion chip does not exist."));
+        assert(false);
+    }
+
+    /**
+     * * The power enable is connected to the XL9555 expansion chip GPIO.
+     * * It must be turned on and can only be started when using a battery.
+     */
+    extension.pinMode(power_enable, OUTPUT);
+    extension.digitalWrite(power_enable, HIGH);
+    _extension_initialized = true;
+}
+
 bool LilyGo_RGBPanel::installSD() {
+    initExtension();
     extension.pinMode(sdmmc_cs, OUTPUT);
     extension.digitalWrite(sdmmc_cs, HIGH);
 
     SD_MMC.setPins(BOARD_SDMMC_SCK, BOARD_SDMMC_CMD, BOARD_SDMMC_DAT);
 
-    if (SD_MMC.begin("/sdcard", true, false)) {
+    // maxOpenFiles 5 -> 10: shot history lives on SD, and the web server serves
+    // many .slog files concurrently alongside live shot logging + index access;
+    // the default of 5 exhausts and throws "too many open files". [GM-90]
+    if (SD_MMC.begin("/sdcard", true, false, BOARD_MAX_SDMMC_FREQ, 10)) {
         uint8_t cardType = SD_MMC.cardType();
         if (cardType != CARD_NONE) {
             Serial.print(F("SD Card Type: "));

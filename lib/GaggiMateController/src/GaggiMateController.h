@@ -1,7 +1,7 @@
 #ifndef GAGGIMATECONTROLLER_H
 #define GAGGIMATECONTROLLER_H
 #include "ControllerConfig.h"
-#include "NimBLEServerController.h"
+#include "GaggiMateServer.h"
 #include <peripherals/DigitalInput.h>
 #include <peripherals/DistanceSensor.h>
 #include <peripherals/Heater.h>
@@ -20,7 +20,7 @@ constexpr int DETECT_VALUE_PIN = 11;
 
 class GaggiMateController {
   public:
-    GaggiMateController();
+    GaggiMateController(String version);
     void setup(void);
     void loop(void);
 
@@ -29,14 +29,16 @@ class GaggiMateController {
   private:
     void detectBoard();
     void detectAddon();
+    void handlePing();
     void handlePingTimeout(void);
     void thermalRunawayShutdown(void);
     void startPidAutotune(void);
     void stopPidAutotune(void);
     void sendSensorData(void);
+    void handleSerialCommand(char c);
 
     ControllerConfig _config = ControllerConfig{};
-    NimBLEServerController _ble;
+    GaggiMateServer _comms;
 
     Max31855Thermocouple *thermocouple = nullptr;
     Heater *heater = nullptr;
@@ -51,7 +53,9 @@ class GaggiMateController {
     HardwareScale *hardwareScale = nullptr;
     std::vector<ControllerConfig> configs;
 
+    String _version;
     unsigned long lastPingTime = 0;
+    size_t errorState = ERROR_CODE_NONE;
 
     const char *LOG_TAG = "GaggiMateController";
 };

@@ -4,14 +4,27 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
-enum class TargetType { TARGET_TYPE_VOLUMETRIC, TARGET_TYPE_PRESSURE };
+enum class TargetType { TARGET_TYPE_VOLUMETRIC, TARGET_TYPE_PRESSURE, TARGET_TYPE_FLOW, TARGET_TYPE_PUMPED };
+enum class TargetOperator { LTE, GTE };
+enum class PumpTarget {
+    PUMP_TARGET_FLOW,
+    PUMP_TARGET_PRESSURE,
+};
+enum class PhaseType { PHASE_TYPE_PREINFUSION, PHASE_TYPE_BREW };
+enum class TransitionType { INSTANT, LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT };
 
 struct Target {
     TargetType type;
+    TargetOperator operator_;
     float value;
-};
 
-enum class PumpTarget { PUMP_TARGET_PRESSURE, PUMP_TARGET_FLOW };
+    bool isReached(float input) const {
+        if (operator_ == TargetOperator::GTE) {
+            return input >= value;
+        }
+        return input <= value;
+    }
+};
 
 struct PumpAdvanced {
     PumpTarget target; // "pressure" | "flow"
@@ -19,7 +32,11 @@ struct PumpAdvanced {
     float flow;
 };
 
-enum class PhaseType { PHASE_TYPE_PREINFUSION, PHASE_TYPE_BREW };
+struct Transition {
+    TransitionType type;
+    float duration;
+    bool adaptive;
+};
 
 struct Phase {
     String name;
@@ -28,6 +45,8 @@ struct Phase {
     float duration;
     bool pumpIsSimple;
     int pumpSimple; // Used if pumpIsSimple == true
+    float temperature;
+    Transition transition;
     PumpAdvanced pumpAdvanced;
     std::vector<Target> targets;
 
@@ -41,12 +60,66 @@ struct Phase {
     }
 
     Target getVolumetricTarget() const {
-        for (const auto &target : targets) {
+        for (auto &target : targets) {
             if (target.type == TargetType::TARGET_TYPE_VOLUMETRIC) {
                 return target;
             }
         }
         return Target{};
+    }
+
+    void adjustDuration(float amount) { duration = std::max(0.5f, duration + amount); }
+
+    void adjustVolumetricTarget(float factor) {
+        for (auto &target : targets) {
+            if (target.type == TargetType::TARGET_TYPE_VOLUMETRIC) {
+                target.value *= factor;
+            }
+        }
+    }
+
+    bool isFinished(bool enableVolumetric, float volume, float time_in_phase, float current_flow, float current_pressure,
+                    float water_pumped, String type) const {
+        bool volumetricTested = false;
+        for (const auto &target : targets) {
+            switch (target.type) {
+            case TargetType::TARGET_TYPE_VOLUMETRIC:
+                volumetricTested = enableVolumetric;
+                if (enableVolumetric && target.isReached(volume)) {
+                    return true;
+                }
+                break;
+            case TargetType::TARGET_TYPE_PRESSURE:
+                if (target.isReached(current_pressure)) {
+                    return true;
+                }
+                break;
+            case TargetType::TARGET_TYPE_FLOW:
+                if (target.isReached(current_flow)) {
+                    return true;
+                }
+                break;
+            case TargetType::TARGET_TYPE_PUMPED:
+                if (target.isReached(water_pumped)) {
+                    return true;
+                }
+                break;
+            }
+        }
+        if (type == "standard" && volumetricTested) {
+            return false;
+        }
+        return time_in_phase > duration;
+    }
+
+    void removeVolumetricTarget() {
+        std::vector<Target> newTargets;
+        for (const auto &target : targets) {
+            if (target.type != TargetType::TARGET_TYPE_VOLUMETRIC) {
+                newTargets.push_back(target);
+            }
+        }
+        targets = newTargets;
     }
 };
 
@@ -55,10 +128,20 @@ struct Profile {
     String label;
     String type; // "standard" | "pro"
     String description;
+    bool utility = false;
     float temperature;
     bool favorite = false;
     bool selected = false;
     std::vector<Phase> phases;
+
+    bool isVolumetric() const {
+        for (const auto &phase : phases) {
+            if (phase.hasVolumetricTarget()) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     unsigned int getPhaseCount() const {
         int brew = 0;
@@ -73,16 +156,82 @@ struct Profile {
         return brew + preinfusion;
     }
 
-    unsigned long getTotalDuration() const {
-        unsigned long duration = 0;
+    float getTotalDuration() const {
+        float duration = 0;
         for (const auto &phase : phases) {
             duration += phase.duration;
         }
         return duration;
     }
+
+    float getTotalVolume() const {
+        float volume = 0.0;
+        for (const auto &phase : phases) {
+            if (phase.hasVolumetricTarget()) {
+                volume = phase.getVolumetricTarget().value;
+            }
+        }
+        return volume;
+    }
+
+    void adjustDuration(float amount) {
+        float totalDuration = 0.0f;
+        ;
+        for (auto &phase : phases) {
+            if (phase.phase == PhaseType::PHASE_TYPE_BREW) {
+                totalDuration += phase.duration;
+            }
+        }
+        for (auto &phase : phases) {
+            if (phase.phase == PhaseType::PHASE_TYPE_BREW) {
+                float share = phase.duration / totalDuration;
+                phase.adjustDuration(amount * share);
+            }
+        }
+    }
+
+    void adjustVolumetricTarget(float amount) {
+        float max = getTotalVolume();
+        float adjustedMax = max + amount;
+        float adjustment = adjustedMax / max;
+        for (auto &phase : phases) {
+            if (phase.hasVolumetricTarget() && phase.phase == PhaseType::PHASE_TYPE_BREW) {
+                phase.adjustVolumetricTarget(adjustment);
+            }
+        }
+    }
+
+    void removeVolumetricTarget() {
+        for (auto &phase : phases) {
+            if (phase.hasVolumetricTarget()) {
+                phase.removeVolumetricTarget();
+            }
+        }
+    }
 };
 
 inline bool parseProfile(const JsonObject &obj, Profile &profile) {
+    // Reject profiles missing the structural fields the rest of the system
+    // assumes are present. Without this, a truncated/corrupted JSON loads as
+    // a Profile with empty strings and zero floats — the UI shows a broken
+    // entry and the brew loop runs against garbage data.
+    const char *idStr = obj["id"].is<const char *>() ? obj["id"].as<const char *>() : "(no-id)";
+    if (obj.isNull()) {
+        ESP_LOGW("parseProfile", "Profile rejected: JSON root is null");
+        return false;
+    }
+    if (!obj["label"].is<const char *>()) {
+        ESP_LOGW("parseProfile", "Profile %s rejected: 'label' missing or not a string", idStr);
+        return false;
+    }
+    if (!obj["type"].is<const char *>()) {
+        ESP_LOGW("parseProfile", "Profile %s rejected: 'type' missing or not a string", idStr);
+        return false;
+    }
+    if (!obj["phases"].is<JsonArray>()) {
+        ESP_LOGW("parseProfile", "Profile %s rejected: 'phases' missing or not an array", idStr);
+        return false;
+    }
     if (obj["id"].is<String>())
         profile.id = obj["id"].as<String>();
     profile.label = obj["label"].as<String>();
@@ -91,6 +240,7 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
     profile.temperature = obj["temperature"].as<float>();
     profile.favorite = obj["favorite"] | false;
     profile.selected = obj["selected"] | false;
+    profile.utility = obj["utility"] | false;
 
     auto phasesArray = obj["phases"].as<JsonArray>();
     for (JsonObject p : phasesArray) {
@@ -99,6 +249,11 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
         phase.phase = p["phase"].as<String>() == "preinfusion" ? PhaseType::PHASE_TYPE_PREINFUSION : PhaseType::PHASE_TYPE_BREW;
         phase.valve = p["valve"].as<int>();
         phase.duration = p["duration"].as<float>();
+        if (p["temperature"].is<float>()) {
+            phase.temperature = p["temperature"].as<float>();
+        } else {
+            phase.temperature = 0.0f;
+        }
 
         if (p["pump"].is<int>()) {
             phase.pumpIsSimple = true;
@@ -112,18 +267,64 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
             phase.pumpAdvanced.flow = pump["flow"].as<float>();
         }
 
+        if (p["transition"].is<JsonObject>()) {
+            auto transition = p["transition"].as<JsonObject>();
+            phase.transition = Transition{};
+            String type = transition["type"].as<String>();
+            if (type == "ease-in-out") {
+                phase.transition.type = TransitionType::EASE_IN_OUT;
+            } else if (type == "linear") {
+                phase.transition.type = TransitionType::LINEAR;
+            } else if (type == "ease-in") {
+                phase.transition.type = TransitionType::EASE_IN;
+            } else if (type == "ease-out") {
+                phase.transition.type = TransitionType::EASE_OUT;
+            } else {
+                phase.transition.type = TransitionType::INSTANT;
+            }
+            phase.transition.duration = transition["duration"].as<float>();
+            phase.transition.adaptive = transition["adaptive"].as<bool>();
+        } else {
+            phase.transition = Transition{
+                .type = TransitionType::INSTANT,
+                .duration = 0,
+                .adaptive = false,
+            };
+        }
+
         if (p["targets"].is<JsonArray>()) {
             auto targetsArray = p["targets"].as<JsonArray>();
             for (JsonObject t : targetsArray) {
                 Target target{};
-                target.type = t["type"].as<String>() == "volumetric" ? TargetType::TARGET_TYPE_VOLUMETRIC
-                                                                     : TargetType::TARGET_TYPE_PRESSURE;
+                auto type = t["type"].as<String>();
+                if (type == "volumetric") {
+                    target.type = TargetType::TARGET_TYPE_VOLUMETRIC;
+                } else if (type == "pressure") {
+                    target.type = TargetType::TARGET_TYPE_PRESSURE;
+                } else if (type == "flow") {
+                    target.type = TargetType::TARGET_TYPE_FLOW;
+                } else if (type == "pumped") {
+                    target.type = TargetType::TARGET_TYPE_PUMPED;
+                } else {
+                    continue;
+                }
+                if (t["operator"].is<String>()) {
+                    target.operator_ = t["operator"].as<String>() == "gte" ? TargetOperator::GTE : TargetOperator::LTE;
+                } else {
+                    target.operator_ = TargetOperator::GTE;
+                }
                 target.value = t["value"].as<float>();
                 phase.targets.push_back(target);
             }
         }
 
         profile.phases.push_back(phase);
+    }
+
+    if (profile.phases.empty()) {
+        ESP_LOGW("parseProfile", "Profile %s ('%s') rejected: phases array empty after parsing", profile.id.c_str(),
+                 profile.label.c_str());
+        return false;
     }
 
     return true;
@@ -137,6 +338,7 @@ inline void writeProfile(JsonObject &obj, const Profile &profile) {
     obj["temperature"] = profile.temperature;
     obj["favorite"] = profile.favorite;
     obj["selected"] = profile.selected;
+    obj["utility"] = profile.utility;
 
     auto phasesArray = obj["phases"].to<JsonArray>();
     for (const Phase &phase : profile.phases) {
@@ -145,6 +347,28 @@ inline void writeProfile(JsonObject &obj, const Profile &profile) {
         p["phase"] = phase.phase == PhaseType::PHASE_TYPE_PREINFUSION ? "preinfusion" : "brew";
         p["valve"] = phase.valve;
         p["duration"] = phase.duration;
+        p["temperature"] = phase.temperature;
+        auto transition = p["transition"].to<JsonObject>();
+        switch (phase.transition.type) {
+        case TransitionType::LINEAR:
+            transition["type"] = "linear";
+            break;
+        case TransitionType::EASE_IN:
+            transition["type"] = "ease-in";
+            break;
+        case TransitionType::EASE_OUT:
+            transition["type"] = "ease-out";
+            break;
+        case TransitionType::EASE_IN_OUT:
+            transition["type"] = "ease-in-out";
+            break;
+        case TransitionType::INSTANT:
+        default:
+            transition["type"] = "instant";
+            break;
+        }
+        transition["duration"] = phase.transition.duration;
+        transition["adaptive"] = phase.transition.adaptive;
 
         if (phase.pumpIsSimple) {
             p["pump"] = phase.pumpSimple;
@@ -159,7 +383,23 @@ inline void writeProfile(JsonObject &obj, const Profile &profile) {
             JsonArray targets = p["targets"].to<JsonArray>();
             for (const Target &t : phase.targets) {
                 auto tObj = targets.add<JsonObject>();
-                tObj["type"] = t.type == TargetType::TARGET_TYPE_VOLUMETRIC ? "volumetric" : "pressure";
+                switch (t.type) {
+                case TargetType::TARGET_TYPE_VOLUMETRIC:
+                    tObj["type"] = "volumetric";
+                    break;
+                case TargetType::TARGET_TYPE_PRESSURE:
+                    tObj["type"] = "pressure";
+                    break;
+                case TargetType::TARGET_TYPE_FLOW:
+                    tObj["type"] = "flow";
+                    break;
+                case TargetType::TARGET_TYPE_PUMPED:
+                    tObj["type"] = "pumped";
+                    break;
+                default:
+                    break;
+                }
+                tObj["operator"] = t.operator_ == TargetOperator::LTE ? "lte" : "gte";
                 tObj["value"] = t.value;
             }
         }

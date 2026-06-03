@@ -1,6 +1,7 @@
 #include "WavesharePanel.h"
 #include "I2C_Driver.h"
 #include "TCA9554PWR.h"
+#include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "utilities.h"
 #include <display/drivers/common/RGBPanelInit.h>
@@ -49,12 +50,10 @@ bool WavesharePanel::begin(WS_RGBPanel_Color_Order order) {
 
     _order = order;
 
-    pinMode(WS_BOARD_TFT_BL, OUTPUT);
-    digitalWrite(WS_BOARD_TFT_BL, LOW);
+    ledcSetup(WS_PWM_CHANNEL, WS_PWM_FREQ, WS_PWM_RESOLUTION);
+    ledcAttachPin(WS_BOARD_TFT_BL, WS_PWM_CHANNEL);
 
-    I2C_Init();
-    delay(120);
-    TCA9554PWR_Init(0x00);
+    initExtension();
     Set_EXIO(EXIO_PIN8, Low);
 
     if (!initTouch()) {
@@ -63,19 +62,31 @@ bool WavesharePanel::begin(WS_RGBPanel_Color_Order order) {
     }
 
     initBUS();
-
     getModel();
-
     return true;
 }
 
+void WavesharePanel::initExtension() {
+    if (_extension_initialized) {
+        return;
+    }
+    I2C_Init();
+    delay(120);
+    TCA9554PWR_Init(0x00);
+    _extension_initialized = true;
+}
+
 bool WavesharePanel::installSD() {
+    initExtension();
     Mode_EXIO(EXIO_PIN4, TCA9554_OUTPUT_REG);
     Set_EXIO(EXIO_PIN4, High);
 
     SD_MMC.setPins(WS_BOARD_SDMMC_SCK, WS_BOARD_SDMMC_CMD, WS_BOARD_SDMMC_DAT);
 
-    if (SD_MMC.begin("/sdcard", true, false)) {
+    // maxOpenFiles 5 -> 10: shot history lives on SD, and the web server serves
+    // many .slog files concurrently alongside live shot logging + index access;
+    // the default of 5 exhausts and throws "too many open files". [GM-90]
+    if (SD_MMC.begin("/sdcard", true, false, BOARD_MAX_SDMMC_FREQ, 10)) {
         uint8_t cardType = SD_MMC.cardType();
         if (cardType != CARD_NONE) {
             Serial.print(F("SD Card Type: "));
@@ -102,34 +113,9 @@ void WavesharePanel::uninstallSD() {
 }
 
 void WavesharePanel::setBrightness(uint8_t value) {
-    static uint8_t steps = 16;
-
-    if (_brightness == value) {
-        return;
-    }
-
-    if (value > 16) {
-        value = 16;
-    }
-    if (value == 0) {
-        digitalWrite(WS_BOARD_TFT_BL, 0);
-        delay(3);
-        _brightness = 0;
-        return;
-    }
-    if (_brightness == 0) {
-        digitalWrite(WS_BOARD_TFT_BL, 1);
-        _brightness = steps;
-        delayMicroseconds(30);
-    }
-    int from = steps - _brightness;
-    int to = steps - value;
-    int num = (steps + to - from) % steps;
-    for (int i = 0; i < num; i++) {
-        digitalWrite(WS_BOARD_TFT_BL, 0);
-        digitalWrite(WS_BOARD_TFT_BL, 1);
-    }
+    value = constrain(value, 0, WS_BACKLIGHT_MAX);
     _brightness = value;
+    ledcWrite(WS_PWM_CHANNEL, _brightness);
 }
 
 uint8_t WavesharePanel::getBrightness() const { return _brightness; }
@@ -898,6 +884,10 @@ void WavesharePanel::initBUS() {
 bool WavesharePanel::initTouch() {
     const uint8_t touch_irq_pin = WS_BOARD_TOUCH_IRQ;
     bool result = false;
+
+    TouchDrvDigitalWrite(0, Low);
+    delay(100);
+    TouchDrvDigitalWrite(0, High);
 
     log_i("=================initTouch====================");
     _touchDrv = new TouchDrvCSTXXX();

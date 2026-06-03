@@ -20,10 +20,18 @@ class DimmedPump : public Pump {
     float getCoffeeVolume();
     float getPumpFlow();
     float getPuckFlow();
+    float getPuckResistance();
+    float getPressureTarget() { return _ctrlPressure; }
+    float getFlowTarget() { return _ctrlFlow; }
+    float getPowerTarget() { return _power; }
+    float *getPumpFlowPtr() { return &_currentFlow; }  // For thermal feedforward
+    int *getValveStatusPtr() { return &_valveStatus; } // For thermal feedforward valve state
     void tare();
 
     void setFlowTarget(float targetFlow, float pressureLimit);
     void setPressureTarget(float targetPressure, float flowLimit);
+    void setPumpFlowCoeff(float oneBarFlow, float nineBarFlow);
+    void setPumpFlowPolyCoeffs(float a, float b, float c, float d);
     void stop();
     void fullPower();
     void setValveState(bool open);

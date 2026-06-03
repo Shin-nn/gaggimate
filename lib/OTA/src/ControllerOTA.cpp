@@ -1,28 +1,32 @@
 #include "ControllerOTA.h"
 #include <HTTPClient.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
 void ControllerOTA::init(NimBLEClient *client, const ctr_progress_callback_t &progress_callback) {
     this->client = client;
     progressCallback = progress_callback;
     NimBLERemoteService *pRemoteService = client->getService(NimBLEUUID(SERVICE_OTA_BLE_UUID));
+    if (pRemoteService == nullptr) {
+        ESP_LOGE("ControllerOTA", "OTA BLE service not found");
+        return;
+    }
     rxChar = pRemoteService->getCharacteristic(NimBLEUUID(CHARACTERISTIC_OTA_BL_UUID_RX));
     txChar = pRemoteService->getCharacteristic(NimBLEUUID(CHARACTERISTIC_OTA_BL_UUID_TX));
-    if (txChar->canNotify()) {
+    if (txChar != nullptr && txChar->canNotify()) {
         txChar->subscribe(true, std::bind(&ControllerOTA::onReceive, this, std::placeholders::_1, std::placeholders::_2,
                                           std::placeholders::_3, std::placeholders::_4));
     }
 }
 
 void ControllerOTA::update(WiFiClientSecure &wifi_client, const String &release_url) {
-    if (SPIFFS.exists("/board-firmware.bin")) {
+    if (LittleFS.exists("/board-firmware.bin")) {
         ESP_LOGI("ControllerOTA", "Removing previous update file");
-        SPIFFS.remove("/board-firmware.bin");
+        LittleFS.remove("/board-firmware.bin");
     }
     if (!downloadFile(wifi_client, release_url)) {
         ESP_LOGE("ControllerOTA", "Download of firmware file failed");
     }
-    File file = SPIFFS.open("/board-firmware.bin", FILE_READ);
+    File file = LittleFS.open("/board-firmware.bin", FILE_READ);
     runUpdate(file, file.size());
     file.close();
 }
@@ -35,7 +39,8 @@ bool ControllerOTA::downloadFile(WiFiClientSecure &wifi_client, const String &re
     }
 
     http.useHTTP10(true);
-    http.setTimeout(1800);
+    http.setTimeout(60000);
+    http.setConnectTimeout(10000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setUserAgent("ESP32-http-Update");
     http.addHeader("Cache-Control", "no-cache");
@@ -63,7 +68,7 @@ bool ControllerOTA::downloadFile(WiFiClientSecure &wifi_client, const String &re
         return false;
     }
 
-    File file = SPIFFS.open("/board-firmware.bin", FILE_WRITE, true);
+    File file = LittleFS.open("/board-firmware.bin", FILE_WRITE, true);
 
     int written = 0;
     while (written < len) {

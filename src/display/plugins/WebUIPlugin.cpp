@@ -1,16 +1,35 @@
 #include "WebUIPlugin.h"
 #include <DNSServer.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
+#include <SD_MMC.h>
+#include <algorithm>
 #include <display/core/Controller.h>
 #include <display/core/ProfileManager.h>
+#include <display/core/process/BrewProcess.h>
+#include <display/core/process/GrindProcess.h>
 #include <display/models/profile.h>
-
-#include "BLEScalePlugin.h"
-#include "ShotHistoryPlugin.h"
+#include <display/plugins/BLEScalePlugin.h>
+#include <display/plugins/ShotHistoryPlugin.h>
+#include <display/util/PsramStlAllocator.h>
+#include <esp_core_dump.h>
+#include <esp_err.h>
+#include <esp_heap_caps.h>
+#include <esp_partition.h>
+#include <string>
+#include <unordered_map>
 #include <vector>
+#include <version.h>
 #include "HardwareScalePlugin.h"
 
-WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") {}
+// Incoming WebSocket payloads (profile uploads reserve up to 64 KB) are
+// reassembled here. Back the character storage with PSRAM so these large,
+// transient buffers don't spike the scarce internal SRAM. The map nodes
+// themselves stay on the default heap (tiny: an id + a string handle).
+using PsramString = std::basic_string<char, std::char_traits<char>, PsramStlAllocator<char>>;
+static std::unordered_map<uint32_t, PsramString> rxBuffers;
+static WebUIPlugin *g_webUIPlugin = nullptr;
+
+WebUIPlugin::WebUIPlugin() : server(80), ws("/ws") { g_webUIPlugin = this; }
 
 void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) {
     this->controller = _controller;
@@ -38,12 +57,31 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         ota->init(controller->getClientController()->getClient());
     });
     pluginManager->on("controller:autotune:result", [this](Event const &event) { sendAutotuneResult(); });
+    pluginManager->on("controller:autotune:failed", [this](Event const &) { sendAutotuneFailed(); });
+
+    // Forward shot history rebuild progress events to WebSocket clients
+    pluginManager->on("evt:history-rebuild-progress", [this](Event const &event) {
+        JsonDocument doc(&psramAllocator);
+        doc["tp"] = "evt:history-rebuild-progress";
+        doc["total"] = event.getInt("total");
+        doc["current"] = event.getInt("current");
+        doc["status"] = event.getString("status");
+        broadcastJson(doc);
+    });
+
+    // Subscribe to Bluetooth scale weight updates
+    pluginManager->on("controller:volumetric-measurement:bluetooth:change",
+                      [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
+
     setupServer();
 }
 
 void WebUIPlugin::loop() {
     if (updating) {
-        pluginManager->trigger("ota:update:start");
+        // Pass which component is being flashed: a controller update streams the
+        // firmware over BLE (wants a low-latency link), a display update is over
+        // Wi-Fi (wants BLE to stay out of the radio's way). "" = both.
+        pluginManager->trigger("ota:update:start", "component", updateComponent);
         ota->update(updateComponent != "display", updateComponent != "controller");
         pluginManager->trigger("ota:update:end");
         updating = false;
@@ -58,44 +96,80 @@ void WebUIPlugin::loop() {
         lastUpdateCheck = now;
         updateOTAStatus(ota->getCurrentVersion());
     }
-    if (now > lastStatus + STATUS_PERIOD) {
+    if (now > lastStatus + STATUS_PERIOD && !ws.getClients().empty()) {
         lastStatus = now;
-        JsonDocument doc;
-        doc["tp"] = "evt:status";
-        doc["ct"] = controller->getCurrentTemp();
-        doc["tt"] = controller->getTargetTemp();
-        doc["pr"] = controller->getCurrentPressure();
-        doc["fl"] = controller->getCurrentPumpFlow();
-        doc["pt"] = controller->getTargetPressure();
+        statusDoc.clear();
+        statusDoc["tp"] = "evt:status";
+        statusDoc["ct"] = controller->getCurrentTemp();
+        statusDoc["tt"] = controller->getTargetTemp();
+        statusDoc["pr"] = controller->getCurrentPressure();
+        statusDoc["fl"] = controller->getCurrentPumpFlow();
+        statusDoc["pt"] = controller->getTargetPressure();
+        statusDoc["m"] = controller->getMode();
+        statusDoc["p"] = controller->getProfileManager()->getSelectedProfile().label;
+        statusDoc["puid"] = controller->getProfileManager()->getSelectedProfile().id;
+        statusDoc["cp"] = controller->getSystemInfo().capabilities.pressure;
+        statusDoc["cd"] = controller->getSystemInfo().capabilities.dimming;
+        statusDoc["tw"] = profileManager->getSelectedProfile().getTotalVolume(); // total target weight for the process
+        statusDoc["bta"] = controller->isVolumetricAvailable() ? 1 : 0;
+        statusDoc["bt"] =
+            controller->isVolumetricAvailable() && controller->getProfileManager()->getSelectedProfile().isVolumetric() ? 1 : 0;
+        statusDoc["btd"] = profileManager->getSelectedProfile().getTotalDuration();
+        statusDoc["led"] = controller->getSystemInfo().capabilities.ledControl;
+        statusDoc["gtd"] = controller->getTargetGrindDuration();
+        statusDoc["gtv"] = controller->getSettings().getTargetGrindVolume();
+        statusDoc["gt"] = controller->isVolumetricAvailable() && controller->getSettings().isVolumetricTarget() ? 1 : 0;
+        statusDoc["gact"] = controller->isGrindActive() ? 1 : 0;
+        statusDoc["wl"] = controller->getWaterLevel();
+        statusDoc["tof"] = controller->getTofDistance();
+        statusDoc["rssi"] = 0;
+        statusDoc["lat"] = -1; // BLE round-trip latency (ms); -1 = not yet measured
+
         if (HardwareScales.isConnected()) {
             doc["cw"] = HardwareScales.getWeight();
         }
-        doc["m"] = controller->getMode();
-        doc["p"] = controller->getProfileManager()->getSelectedProfile().label;
-        doc["cp"] = controller->getSystemInfo().capabilities.pressure;
-        doc["cd"] = controller->getSystemInfo().capabilities.dimming;
         doc["hs"] = controller->getSystemInfo().capabilities.hwScale;
-        doc["bt"] = controller->isVolumetricAvailable() && controller->getSettings().isVolumetricTarget() ? 1 : 0;
-        doc["led"] = controller->getSystemInfo().capabilities.ledControl;
+
+        if (controller->getClientController()->getClient()->isConnected()) {
+            statusDoc["rssi"] = controller->getClientController()->getClient()->getRssi();
+        }
+        if (controller->getClientController()->hasLatency()) {
+            statusDoc["lat"] = controller->getClientController()->getLatencyMs();
+        }
+
+        bool bleConnected = BLEScales.isConnected();
+        // Add Bluetooth scale weight information
+        statusDoc["bw"] = bleConnected ? this->currentBluetoothWeight : 0; // current bluetooth weight
+        statusDoc["cw"] = bleConnected ? this->currentBluetoothWeight : 0; // Use 'currentWeight' for forward compatbility
+        statusDoc["bc"] = bleConnected;                                    // bluetooth scale connected status
+        // Scale battery — only surfaced when the driver reports one and the
+        // value isn't the UNKNOWN sentinel (255). UI omits the battery pill
+        // entirely when `sbat` is absent, so disconnected/unknown scales don't
+        // render a stale stub.
+        if (bleConnected && BLEScales.hasBatteryLevel()) {
+            const uint8_t pct = BLEScales.getBatteryLevel();
+            if (pct != REMOTE_SCALES_BATTERY_UNKNOWN) {
+                statusDoc["sbat"] = pct;
+            }
+        }
 
         Process *process = controller->getProcess();
         if (process == nullptr) {
             process = controller->getLastProcess();
         }
         if (process != nullptr) {
-            JsonObject pObj = doc.createNestedObject("process");
+            auto pObj = statusDoc["process"].to<JsonObject>();
             pObj["a"] = controller->isActive() ? 1 : 0;
             if (process->getType() == MODE_BREW) {
                 auto *brew = static_cast<BrewProcess *>(process);
-                unsigned long ts = millis();
-                if (!brew->isActive()) {
-                    ts = brew->finished;
-                }
+                unsigned long ts = brew->isActive() && controller->isActive() ? millis() : brew->finished;
                 pObj["s"] = brew->currentPhase.phase == PhaseType::PHASE_TYPE_BREW ? "brew" : "infusion";
                 pObj["l"] = brew->isActive() ? brew->currentPhase.name.c_str() : "Finished";
                 pObj["e"] = ts - brew->processStarted;
-                pObj["tt"] = brew->target == ProcessTarget::TIME ? "time" : "volumetric";
-                if (brew->target == ProcessTarget::VOLUMETRIC && brew->currentPhase.hasVolumetricTarget()) {
+                const bool isVolumetric = brew->target == ProcessTarget::VOLUMETRIC && brew->currentPhase.hasVolumetricTarget() &&
+                                          controller->isVolumetricAvailable();
+                pObj["tt"] = isVolumetric ? "volumetric" : "time";
+                if (isVolumetric) {
                     Target t = brew->currentPhase.getVolumetricTarget();
                     pObj["pt"] = t.value;
                     pObj["pp"] = brew->currentVolume;
@@ -103,10 +177,25 @@ void WebUIPlugin::loop() {
                     pObj["pt"] = brew->getPhaseDuration();
                     pObj["pp"] = ts - brew->currentPhaseStarted;
                 }
+            } else if (process->getType() == MODE_GRIND) {
+                auto *grind = static_cast<GrindProcess *>(process);
+                unsigned long ts = grind->isActive() && controller->isActive() ? millis() : grind->finished;
+                pObj["s"] = "grind";
+                pObj["l"] = grind->isActive() ? "Grinding" : "Finished";
+                pObj["e"] = ts - grind->started;
+                const bool isVolumetric = grind->target == ProcessTarget::VOLUMETRIC && controller->isVolumetricAvailable();
+                pObj["tt"] = isVolumetric ? "volumetric" : "time";
+                if (isVolumetric) {
+                    pObj["pt"] = grind->grindVolume;
+                    pObj["pp"] = grind->currentVolume;
+                } else {
+                    pObj["pt"] = grind->time;
+                    pObj["pp"] = ts - grind->started;
+                }
             }
         }
 
-        ws.textAll(doc.as<String>());
+        broadcastJson(statusDoc);
     }
     if (now > lastCleanup + CLEANUP_PERIOD) {
         lastCleanup = now;
@@ -137,7 +226,7 @@ void WebUIPlugin::setupServer() {
     server.on("/api/settings", [this](AsyncWebServerRequest *request) { handleSettings(request); });
     server.on("/api/status", [this](AsyncWebServerRequest *request) {
         AsyncResponseStream *response = request->beginResponseStream("application/json");
-        JsonDocument doc;
+        JsonDocument doc(&psramAllocator);
         doc["mode"] = controller->getMode();
         doc["tt"] = controller->getTargetTemp();
         doc["ct"] = controller->getCurrentTemp();
@@ -151,57 +240,47 @@ void WebUIPlugin::setupServer() {
     server.on("/api/scales/connect", [this](AsyncWebServerRequest *request) { handleBLEScaleConnect(request); });
     server.on("/api/scales/scan", [this](AsyncWebServerRequest *request) { handleBLEScaleScan(request); });
     server.on("/api/scales/info", [this](AsyncWebServerRequest *request) { handleBLEScaleInfo(request); });
-    server.onNotFound([](AsyncWebServerRequest *request) { request->send(SPIFFS, "/w/index.html"); });
-    server.serveStatic("/", SPIFFS, "/w").setDefaultFile("index.html").setCacheControl("max-age=0");
+    FS *fs = &LittleFS;
+    if (controller->isSDCard()) {
+        fs = &SD_MMC;
+    }
+    server.serveStatic("/api/history/", *fs, "/h/").setCacheControl("no-store");
+    server.on("/api/history/index.bin", HTTP_GET, [this, fs](AsyncWebServerRequest *request) {
+        // Serve the binary index file directly
+        if (fs->exists("/h/index.bin")) {
+            request->send(*fs, "/h/index.bin", "application/octet-stream");
+        } else {
+            request->send(404, "text/plain", "Index not found");
+        }
+    });
+    server.on("/api/core-dump", HTTP_GET, [this](AsyncWebServerRequest *request) { handleCoreDumpDownload(request); });
+    server.onNotFound([](AsyncWebServerRequest *request) { request->send(LittleFS, "/w/index.html"); });
+    // Content-hashed build assets (Vite emits them under /assets/ with a hash in the filename) never change for a
+    // given URL, so let the browser cache them forever and skip the revalidation round-trip entirely. This must be
+    // registered before the catch-all "/" handler so it wins for /assets/* requests. [GM-83]
+    server.serveStatic("/assets/", LittleFS, "/w/assets/").setCacheControl("public, max-age=31536000, immutable");
+    // index.html and other unhashed root files must stay revalidated so a new build (which references freshly
+    // hashed assets) is always picked up after an OTA/filesystem update.
+    server.serveStatic("/", LittleFS, "/w").setDefaultFile("index.html").setCacheControl("no-cache");
     ws.onEvent(
         [this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
             if (type == WS_EVT_CONNECT) {
+                // Close (and let the browser reconnect) a client whose send
+                // queue backs up, instead of keeping it open. With it kept open
+                // (false), a client that stalls under load — e.g. while the UI
+                // is fetching many shot files for statistics — never has its
+                // queued frames / AsyncTCP buffers reclaimed, so they accumulate
+                // in internal DRAM until the whole IP stack starves (web + ICMP
+                // die, no recovery). Reclaiming via close is the safer failure
+                // mode. (Was the v1.8.1 behaviour.)
                 client->setCloseClientOnQueueFull(true);
                 ESP_LOGI("WebUIPlugin", "WebSocket client connected (%d open connections)", server->getClients().size());
             } else if (type == WS_EVT_DISCONNECT) {
                 ESP_LOGI("WebUIPlugin", "WebSocket client disconnected (%d open connections)", server->getClients().size());
+                rxBuffers.erase(client->id());
             } else if (type == WS_EVT_DATA) {
-                auto *info = static_cast<AwsFrameInfo *>(arg);
-                if (info->final && info->index == 0 && info->len == len) {
-                    if (info->opcode == WS_TEXT) {
-                        data[len] = 0;
-                        ESP_LOGI("WebUIPlugin", "Received request: %", (char *)data);
-                        JsonDocument doc;
-                        DeserializationError err = deserializeJson(doc, data);
-                        if (!err) {
-                            String msgType = doc["tp"].as<String>();
-                            if (msgType.startsWith("req:profiles:")) {
-                                handleProfileRequest(client->id(), doc);
-                            } else if (msgType == "req:ota-settings") {
-                                handleOTASettings(client->id(), doc);
-                            } else if (msgType == "req:ota-start") {
-                                handleOTAStart(client->id(), doc);
-                            } else if (msgType == "req:autotune-start") {
-                                handleAutotuneStart(client->id(), doc);
-                            } else if (msgType == "req:process:activate") {
-                                controller->activate();
-                            } else if (msgType == "req:process:deactivate") {
-                                controller->deactivate();
-                            } else if (msgType == "req:process:clear") {
-                                controller->clear();
-                            } else if (msgType == "req:change-mode") {
-                                if (doc["mode"].is<uint8_t>()) {
-                                    auto mode = doc["mode"].as<uint8_t>();
-                                    controller->deactivate();
-                                    controller->setMode(mode);
-                                }
-                            } else if (msgType == "req:change-brew-target") {
-                                if (doc["target"].is<uint8_t>()) {
-                                    auto target = doc["target"].as<uint8_t>();
-                                    controller->getSettings().setVolumetricTarget(target);
-                                }
-                            } else if (msgType.startsWith("req:history")) {
-                                JsonDocument resp;
-                                ShotHistory.handleRequest(doc, resp);
-                                String msg;
-                                serializeJson(resp, msg);
-                                ws.text(client->id(), msg);
-                            } else if (msgType == "req:scale:tare") {
+                handleWebSocketData(server, client, type, arg, data, len);
+            } else if (msgType == "req:scale:tare") {
                                 if (HardwareScales.isConnected()) {
                                     HardwareScales.tare();
                                 }
@@ -210,10 +289,6 @@ void WebUIPlugin::setupServer() {
                                     HardwareScales.calibrate(doc["cell"].as<uint8_t>(), doc["calWeight"].as<float>());
                                 }
                             }
-                        }
-                    }
-                }
-            }
         });
     server.addHandler(&ws);
 }
@@ -245,6 +320,106 @@ void WebUIPlugin::stop() {
     serverRunning = false;
 }
 
+void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg,
+                                      uint8_t *data, size_t len) {
+
+    auto *info = static_cast<AwsFrameInfo *>(arg);
+    const uint32_t cid = client->id();
+
+    if (info->index == 0) {
+        auto &buf = rxBuffers[cid];
+        buf.clear();
+        if (info->len <= 64 * 1024) {
+            buf.reserve(info->len);
+        }
+    }
+
+    auto &buf = rxBuffers[cid];
+    buf.append(reinterpret_cast<const char *>(data), len);
+    const bool isFinal = info->final && (info->index + len) == info->len;
+
+    // If this is the final frame of the message, process and clear
+    if (isFinal) {
+        if (info->opcode == WS_TEXT) {
+            ESP_LOGV("WebUIPlugin", "Received request: %.*s", (int)buf.size(), buf.c_str());
+            JsonDocument doc(&psramAllocator);
+            DeserializationError err = deserializeJson(doc, buf.c_str());
+            if (!err) {
+                String msgType = doc["tp"].as<String>();
+                if (msgType.startsWith("req:profiles:")) {
+                    handleProfileRequest(client->id(), doc);
+                } else if (msgType == "req:ota-settings") {
+                    handleOTASettings(client->id(), doc);
+                } else if (msgType == "req:ota-start") {
+                    handleOTAStart(client->id(), doc);
+                } else if (msgType == "req:autotune-start") {
+                    handleAutotuneStart(client->id(), doc);
+                } else if (msgType == "req:process:activate") {
+                    controller->activate();
+                } else if (msgType == "req:process:deactivate") {
+                    controller->deactivate();
+                    controller->clear();
+                } else if (msgType == "req:process:clear") {
+                    controller->clear();
+                } else if (msgType == "req:grind:activate") {
+                    controller->activateGrind();
+                } else if (msgType == "req:grind:deactivate") {
+                    controller->deactivateGrind();
+                } else if (msgType == "req:change-grind-target") {
+                    if (doc["target"].is<uint8_t>()) {
+                        auto target = doc["target"].as<uint8_t>();
+                        controller->getSettings().setVolumetricTarget(target);
+                    }
+                } else if (msgType == "req:raise-temp") {
+                    controller->raiseTemp();
+                } else if (msgType == "req:lower-temp") {
+                    controller->lowerTemp();
+                } else if (msgType == "req:raise-grind-target") {
+                    controller->raiseGrindTarget();
+                } else if (msgType == "req:lower-grind-target") {
+                    controller->lowerGrindTarget();
+                } else if (msgType == "req:change-mode") {
+                    if (doc["mode"].is<uint8_t>()) {
+                        auto mode = doc["mode"].as<uint8_t>();
+                        controller->deactivate();
+                        controller->clear();
+                        controller->setMode(mode);
+                    }
+                } else if (msgType == "req:change-brew-target") {
+                    if (doc["target"].is<uint8_t>()) {
+                        auto target = doc["target"].as<uint8_t>();
+                        controller->getSettings().setVolumetricTarget(target);
+                    }
+                } else if (msgType == "req:history:rebuild") {
+                    // Handle rebuild asynchronously - send immediate ack, progress comes via events
+                    JsonDocument resp(&psramAllocator);
+                    resp["tp"] = "res:history:rebuild";
+                    if (doc["rid"].is<const char *>()) {
+                        resp["rid"] = doc["rid"];
+                    }
+                    resp["msg"] = "Rebuild started";
+                    size_t bufferSize = measureJson(resp);
+                    auto *buffer = ws.makeBuffer(bufferSize);
+                    serializeJson(resp, buffer->get(), bufferSize);
+                    client->text(buffer);
+                    ShotHistory.startAsyncRebuild();
+                } else if (msgType.startsWith("req:history")) {
+                    JsonDocument resp(&psramAllocator);
+                    ShotHistory.handleRequest(doc, resp);
+                    size_t bufferSize = measureJson(resp);
+                    auto *buffer = ws.makeBuffer(bufferSize);
+                    serializeJson(resp, buffer->get(), bufferSize);
+                    client->text(buffer);
+                } else if (msgType == "req:flush:start") {
+                    handleFlushStart(client->id(), doc);
+                }
+            }
+        }
+        // Done with this message
+        rxBuffers.erase(cid);
+    }
+}
+
 void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     if (request["update"].as<bool>()) {
         if (!request["channel"].isNull()) {
@@ -268,11 +443,18 @@ void WebUIPlugin::handleOTAStart(uint32_t clientId, JsonDocument &request) {
 void WebUIPlugin::handleAutotuneStart(uint32_t clientId, JsonDocument &request) {
     int testTime = request["time"].as<int>();
     int samples = request["samples"].as<int>();
-    controller->autotune(testTime, samples);
+    // Heater wattage drives combinedKff = TUNER_OUTPUT_SPAN / wattage on the
+    // controller. 0 = "skip combinedKff derivation" — happens when older Web
+    // UI builds omit the field. WebUI form default is 680 W (Gaggia Classic
+    // Pro 2019 / E24, 230 V boiler).
+    int heaterWattage = request["wattage"] | 0;
+    controller->autotune(testTime, samples, heaterWattage);
 }
 
 void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request) {
-    JsonDocument response;
+    // Allocate the response node pool from PSRAM — list responses can be tens
+    // of KB and would otherwise fragment the ~300 KB internal heap.
+    JsonDocument response(&psramAllocator);
     auto type = request["tp"].as<String>();
     ESP_LOGI("WebUIPlugin", "Handling request: %s", type.c_str());
     response["tp"] = String("res:") + type.substring(4);
@@ -282,9 +464,21 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
         auto arr = response["profiles"].to<JsonArray>();
         for (auto const &id : profileManager->listProfiles()) {
             Profile profile{};
-            profileManager->loadProfile(id, profile);
+            // Skip entries whose JSON couldn't be opened or failed validation
+            // (parseProfile returns false for missing label/type/phases). Without
+            // this, corrupt or partial profile files surface as blank cards in
+            // the UI — the user reported "blank Simple cards" originating here.
+            if (!profileManager->loadProfile(id, profile)) {
+                ESP_LOGW("WebUIPlugin", "Skipping unreadable profile %s in list response", id.c_str());
+                continue;
+            }
             auto p = arr.add<JsonObject>();
-            writeProfile(p, profile);
+            if (request["minimal"].as<bool>()) {
+                p["id"] = profile.id;
+                p["label"] = profile.label;
+            } else {
+                writeProfile(p, profile);
+            }
         }
     } else if (type == "req:profiles:load") {
         auto id = request["id"].as<String>();
@@ -314,15 +508,30 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
         profileManager->selectProfile(id);
     } else if (type == "req:profiles:favorite") {
         auto id = request["id"].as<String>();
-        controller->getSettings().addFavoritedProfile(id);
+        profileManager->addFavoritedProfile(id);
     } else if (type == "req:profiles:unfavorite") {
         auto id = request["id"].as<String>();
-        controller->getSettings().removeFavoritedProfile(id);
+        profileManager->removeFavoritedProfile(id);
+    } else if (type == "req:profiles:reorder") {
+        // Expect an array of profile IDs in desired order
+        if (request["order"].is<JsonArray>()) {
+            std::vector<String> order;
+            for (JsonVariant v : request["order"].as<JsonArray>()) {
+                if (v.is<String>()) {
+                    String id = v.as<String>();
+                    if (!id.isEmpty() && std::find(order.begin(), order.end(), id) == order.end()) {
+                        order.emplace_back(std::move(id));
+                    }
+                }
+            }
+            controller->getSettings().setProfileOrder(order);
+        }
     }
 
-    String msg;
-    serializeJson(response, msg);
-    ws.text(clientId, msg);
+    size_t bufferSize = measureJson(response);
+    auto *buffer = ws.makeBuffer(bufferSize);
+    serializeJson(response, buffer->get(), bufferSize);
+    ws.text(clientId, buffer);
 }
 
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
@@ -330,6 +539,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
         controller->getSettings().batchUpdate([request](Settings *settings) {
             if (request->hasArg("startupMode"))
                 settings->setStartupMode(request->arg("startupMode") == "brew" ? MODE_BREW : MODE_STANDBY);
+            if (request->hasArg("startupProfile"))
+                settings->setStartupProfile(request->arg("startupProfile"));
             if (request->hasArg("targetSteamTemp"))
                 settings->setTargetSteamTemp(request->arg("targetSteamTemp").toInt());
             if (request->hasArg("targetWaterTemp"))
@@ -340,6 +551,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setPressureScaling(request->arg("pressureScaling").toFloat());
             if (request->hasArg("pid"))
                 settings->setPid(request->arg("pid"));
+            if (request->hasArg("pumpModelCoeffs"))
+                settings->setPumpModelCoeffs(request->arg("pumpModelCoeffs"));
             if (request->hasArg("wifiSsid"))
                 settings->setWifiSsid(request->arg("wifiSsid"));
             if (request->hasArg("mdnsName"))
@@ -366,6 +579,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setHomeAssistantIP(request->arg("haIP"));
             if (request->hasArg("haPort"))
                 settings->setHomeAssistantPort(request->arg("haPort").toInt());
+            if (request->hasArg("haTopic"))
+                settings->setHomeAssistantTopic(request->arg("haTopic"));
             settings->setMomentaryButtons(request->hasArg("momentaryButtons"));
             settings->setDelayAdjust(request->hasArg("delayAdjust"));
             if (request->hasArg("brewDelay"))
@@ -385,6 +600,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setStandbyBrightnessTimeout(request->arg("standbyBrightnessTimeout").toInt() * 1000);
             if (request->hasArg("steamPumpPercentage"))
                 settings->setSteamPumpPercentage(request->arg("steamPumpPercentage").toFloat());
+            if (request->hasArg("steamPumpCutoff"))
+                settings->setSteamPumpCutoff(request->arg("steamPumpCutoff").toFloat());
             if (request->hasArg("themeMode"))
                 settings->setThemeMode(request->arg("themeMode").toInt());
             if (request->hasArg("sunriseR"))
@@ -401,24 +618,75 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setEmptyTankDistance(request->arg("emptyTankDistance").toInt());
             if (request->hasArg("fullTankDistance"))
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
+            if (request->hasArg("altRelayFunction"))
+                settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
+            if (request->hasArg("buttonBehavior"))
+                settings->setButtonBehaviorList(explode(request->arg("buttonBehavior"), ','));
+            settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled"));
+            if (request->hasArg("autowakeupSchedules")) {
+                // Handle schedule format with days
+                String schedulesStr = request->arg("autowakeupSchedules");
+                std::vector<AutoWakeupSchedule> schedules;
+
+                if (schedulesStr.length() > 0) {
+                    // Split semicolon-separated schedules
+                    int start = 0;
+                    int end = schedulesStr.indexOf(';');
+
+                    while (end != -1 || start < schedulesStr.length()) {
+                        String scheduleStr = (end != -1) ? schedulesStr.substring(start, end) : schedulesStr.substring(start);
+
+                        int pipePos = scheduleStr.indexOf('|');
+                        if (pipePos != -1) {
+                            String timeStr = scheduleStr.substring(0, pipePos);
+                            String daysStr = scheduleStr.substring(pipePos + 1);
+
+                            AutoWakeupSchedule schedule;
+                            schedule.time = timeStr;
+
+                            if (daysStr.length() == 7) {
+                                for (int i = 0; i < 7; i++) {
+                                    schedule.days[i] = (daysStr.charAt(i) == '1');
+                                }
+                            }
+
+                            schedules.push_back(schedule);
+                        }
+
+                        if (end == -1)
+                            break;
+                        start = end + 1;
+                        end = schedulesStr.indexOf(';', start);
+                    }
+                }
+
+                if (schedules.empty()) {
+                    schedules.push_back(AutoWakeupSchedule("07:00")); // Default fallback
+                }
+                settings->setAutoWakeupSchedules(schedules);
+            }
             if (request->hasArg("scaleFactor1") || request->hasArg("scaleFactor2")) {
                 float scaleFactor1 = settings->getScaleFactor1();
                 float scaleFactor2 = settings->getScaleFactor2();
                 if (request->hasArg("scaleFactor1"))
                     scaleFactor1 = request->arg("scaleFactor1").toFloat();
-                if (request->hasArg("scaleFactor2"))   
+                if (request->hasArg("scaleFactor2"))
                     scaleFactor2 = request->arg("scaleFactor2").toFloat();
                 settings->setScaleFactors(scaleFactor1, scaleFactor2);
             }
+
             settings->save(true);
         });
+        pluginManager->trigger("settings:changed");
         controller->setTargetTemp(controller->getTargetTemp());
+        controller->setPumpModelCoeffs();
     }
 
     AsyncResponseStream *response = request->beginResponseStream("application/json");
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     Settings const &settings = controller->getSettings();
     doc["startupMode"] = settings.getStartupMode() == MODE_BREW ? "brew" : "standby";
+    doc["startupProfile"] = settings.getStartupProfile();
     doc["targetSteamTemp"] = settings.getTargetSteamTemp();
     doc["targetWaterTemp"] = settings.getTargetWaterTemp();
     doc["homekit"] = settings.isHomekit();
@@ -427,7 +695,9 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["haPassword"] = settings.getHomeAssistantPassword();
     doc["haIP"] = settings.getHomeAssistantIP();
     doc["haPort"] = settings.getHomeAssistantPort();
+    doc["haTopic"] = settings.getHomeAssistantTopic();
     doc["pid"] = settings.getPid();
+    doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();
     doc["wifiPassword"] = apMode ? "---unchanged---" : settings.getWifiPassword();
     doc["mdnsName"] = settings.getMdnsName();
@@ -450,6 +720,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["standbyBrightness"] = settings.getStandbyBrightness();
     doc["standbyBrightnessTimeout"] = settings.getStandbyBrightnessTimeout() / 1000;
     doc["steamPumpPercentage"] = settings.getSteamPumpPercentage();
+    doc["steamPumpCutoff"] = settings.getSteamPumpCutoff();
     doc["themeMode"] = settings.getThemeMode();
     doc["sunriseR"] = settings.getSunriseR();
     doc["sunriseG"] = settings.getSunriseG();
@@ -458,6 +729,25 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["sunriseExtBrightness"] = settings.getSunriseExtBrightness();
     doc["emptyTankDistance"] = settings.getEmptyTankDistance();
     doc["fullTankDistance"] = settings.getFullTankDistance();
+    doc["altRelayFunction"] = settings.getAltRelayFunction();
+    // Add auto-wakeup settings to response
+    doc["autowakeupEnabled"] = settings.isAutoWakeupEnabled();
+    doc["buttonBehavior"] = implode(settings.getButtonBehaviorList(), ",");
+
+    // Add schedule format with days
+    std::vector<AutoWakeupSchedule> autowakeupSchedules = settings.getAutoWakeupSchedules();
+    String schedulesStr = "";
+    for (size_t i = 0; i < autowakeupSchedules.size(); i++) {
+        if (i > 0)
+            schedulesStr += ";";
+        schedulesStr += autowakeupSchedules[i].time + "|";
+
+        // Convert days array to 7-bit string
+        for (int j = 0; j < 7; j++) {
+            schedulesStr += autowakeupSchedules[i].days[j] ? "1" : "0";
+        }
+    }
+    doc["autowakeupSchedules"] = schedulesStr;
     doc["scaleFactor1"] = settings.getScaleFactor1();
     doc["scaleFactor2"] = settings.getScaleFactor2();
     serializeJson(doc, *response);
@@ -468,13 +758,14 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
 }
 
 void WebUIPlugin::handleBLEScaleList(AsyncWebServerRequest *request) {
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     JsonArray scalesArray = doc.to<JsonArray>();
     std::vector<DiscoveredDevice> devices = BLEScales.getDiscoveredScales();
     for (const DiscoveredDevice &device : BLEScales.getDiscoveredScales()) {
-        JsonDocument scale;
+        JsonDocument scale(&psramAllocator);
         scale["uuid"] = device.getAddress().toString();
         scale["name"] = device.getName();
+        scale["rssi"] = device.getRSSI();
         scalesArray.add(scale);
     }
     AsyncResponseStream *response = request->beginResponseStream("application/json");
@@ -488,7 +779,7 @@ void WebUIPlugin::handleBLEScaleScan(AsyncWebServerRequest *request) {
         return;
     }
     BLEScales.scan();
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     doc["success"] = true;
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);
@@ -501,7 +792,7 @@ void WebUIPlugin::handleBLEScaleConnect(AsyncWebServerRequest *request) {
         return;
     }
     BLEScales.connect(request->arg("uuid").c_str());
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     doc["success"] = true;
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);
@@ -509,18 +800,31 @@ void WebUIPlugin::handleBLEScaleConnect(AsyncWebServerRequest *request) {
 }
 
 void WebUIPlugin::handleBLEScaleInfo(AsyncWebServerRequest *request) {
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     doc["connected"] = BLEScales.isConnected();
     doc["name"] = BLEScales.getName();
     doc["uuid"] = BLEScales.getUUID();
+    doc["rssi"] = BLEScales.getRSSI();
+    doc["hasBattery"] = BLEScales.hasBatteryLevel();
+    // Only surface the numeric when the scale reports one — a 255 sentinel
+    // (REMOTE_SCALES_BATTERY_UNKNOWN) would otherwise render as a fake "255%".
+    if (BLEScales.hasBatteryLevel()) {
+        const uint8_t pct = BLEScales.getBatteryLevel();
+        if (pct != REMOTE_SCALES_BATTERY_UNKNOWN) {
+            doc["battery"] = pct;
+        }
+    }
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);
     request->send(response);
 }
 
 void WebUIPlugin::updateOTAStatus(const String &version) {
+    if (ws.getClients().empty()) {
+        return;
+    }
     Settings const &settings = controller->getSettings();
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     doc["latestVersion"] = ota->getCurrentVersion();
     doc["tp"] = "res:ota-settings";
     doc["displayUpdateAvailable"] = ota->isUpdateAvailable(false);
@@ -531,22 +835,140 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["latestVersion"] = ota->getCurrentVersion();
     doc["channel"] = settings.getOTAChannel();
     doc["updating"] = updating;
-    ws.textAll(doc.as<String>());
+    // LittleFS usage metrics
+    {
+        size_t total = LittleFS.totalBytes();
+        size_t used = LittleFS.usedBytes();
+        size_t freeBytes = total > used ? (total - used) : 0;
+        doc["spiffsTotal"] = static_cast<uint32_t>(total);
+        doc["spiffsUsed"] = static_cast<uint32_t>(used);
+        doc["spiffsFree"] = static_cast<uint32_t>(freeBytes);
+        if (total > 0) {
+            doc["spiffsUsedPct"] = static_cast<uint8_t>((used * 100) / total);
+        }
+    }
+    // Memory usage metrics
+    {
+        size_t free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL);
+        size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL);
+        size_t total = heap_caps_get_total_size(MALLOC_CAP_DEFAULT | MALLOC_CAP_INTERNAL);
+        doc["heapFree"] = static_cast<uint32_t>(free);
+        doc["heapLargest"] = static_cast<uint32_t>(largest);
+        doc["heapTotal"] = static_cast<uint32_t>(total);
+    }
+    doc["controllerTaskHealth"] = controller->isTaskHealthy();
+#ifndef GAGGIMATE_HEADLESS
+    doc["uiTaskHealth"] = controller->getUI()->isTaskHealthy();
+#endif
+    if (controller->isSDCard()) {
+        const uint64_t total = SD_MMC.cardSize();
+        const uint64_t used = SD_MMC.usedBytes();
+        const uint64_t freeBytes = total > used ? (total - used) : 0;
+        doc["sdTotal"] = total;
+        doc["sdUsed"] = used;
+        doc["sdFree"] = freeBytes;
+        if (total > 0) {
+            // Provide integer percentage to avoid float JSON
+            doc["sdUsedPct"] = static_cast<uint8_t>((used * 100) / total);
+        }
+    }
+    broadcastJson(doc);
 }
 
 void WebUIPlugin::updateOTAProgress(uint8_t phase, int progress) {
-    JsonDocument doc;
+    if (ws.getClients().empty()) {
+        return;
+    }
+    JsonDocument doc(&psramAllocator);
     doc["tp"] = "evt:ota-progress";
     doc["phase"] = phase;
     doc["progress"] = progress;
-    String message = doc.as<String>();
-    ws.textAll(message);
+    broadcastJson(doc);
+}
+
+void WebUIPlugin::broadcastJson(JsonDocument &doc) {
+    if (ws.getClients().empty()) {
+        return;
+    }
+    const size_t len = measureJson(doc);
+    auto *buffer = ws.makeBuffer(len);
+    if (buffer == nullptr) {
+        return; // out of buffers; drop this broadcast rather than churn the heap
+    }
+    serializeJson(doc, buffer->get(), len);
+    ws.textAll(buffer);
 }
 
 void WebUIPlugin::sendAutotuneResult() {
-    JsonDocument doc;
+    JsonDocument doc(&psramAllocator);
     doc["tp"] = "evt:autotune-result";
     doc["pid"] = controller->getSettings().getPid();
-    String message = doc.as<String>();
-    ws.textAll(message);
+    broadcastJson(doc);
+}
+
+void WebUIPlugin::sendAutotuneFailed() {
+    // Distinct WS event — Autotune page renders "timed out" error card
+    // instead of stuck spinner. Fires on ERROR_CODE_AUTOTUNE_TIMEOUT.
+    JsonDocument doc(&psramAllocator);
+    doc["tp"] = "evt:autotune-failed";
+    broadcastJson(doc);
+}
+
+void WebUIPlugin::handleFlushStart(uint32_t clientId, JsonDocument &request) {
+    controller->onFlush();
+
+    JsonDocument response(&psramAllocator);
+    response["tp"] = "res:flush:start";
+    response["rid"] = request["rid"];
+    response["success"] = true;
+
+    String msg;
+    serializeJson(response, msg);
+    ws.text(clientId, msg);
+}
+
+void WebUIPlugin::handleCoreDumpDownload(AsyncWebServerRequest *request) {
+    // Check if core dump is available
+    size_t coreAddr, coreSize;
+    if (esp_core_dump_image_get(&coreAddr, &coreSize) != ESP_OK || coreSize == 0) {
+        request->send(404, "text/plain", "No core dump available");
+        return;
+    }
+
+    // Find the coredump partition
+    const esp_partition_t *coredump_partition =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+    if (coredump_partition == NULL) {
+        request->send(500, "text/plain", "Core dump partition not found");
+        return;
+    }
+
+    ESP_LOGI("WebUIPlugin", "Streaming core dump: %d bytes from 0x%x", coreSize, coreAddr);
+
+    // Create a streaming response
+    AsyncWebServerResponse *response =
+        request->beginResponse("application/octet-stream", coreSize,
+                               [coredump_partition, coreSize](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+                                   // Calculate how much to read
+                                   size_t remaining = coreSize - index;
+                                   size_t toRead = (remaining < maxLen) ? remaining : maxLen;
+
+                                   if (toRead == 0)
+                                       return 0;
+
+                                   // Read from partition
+                                   esp_err_t err = esp_partition_read(coredump_partition, index, buffer, toRead);
+                                   if (err != ESP_OK) {
+                                       ESP_LOGE("WebUIPlugin", "Failed to read core dump: %s", esp_err_to_name(err));
+                                       return 0;
+                                   }
+
+                                   return toRead;
+                               });
+
+    // Set appropriate headers
+    response->addHeader("Content-Disposition", "attachment; filename=\"coredump.bin\"");
+    response->addHeader("Cache-Control", "no-cache");
+
+    request->send(response);
 }
