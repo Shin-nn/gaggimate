@@ -44,6 +44,8 @@ message Payload {
         PressureScale pressure_scale = 9;
         Tare tare = 10;
         LedControl led = 11;
+        ScaleCalibration set_scale_calibration = 12;
+        CalibrateScaleRequest calibrate_scale = 13;
 
         // Responses: controller -> display
         SystemInfo system_info = 20;
@@ -53,6 +55,8 @@ message Payload {
         VolumetricMeasurement volumetric = 24;
         TofMeasurement tof = 25;
         Error error = 26;
+        ScaleCalibration scale_calibrated = 27;
+        VolumetricMeasurement scale_measurement = 28;
     }
 }
 
@@ -141,6 +145,18 @@ message LedControl {
     repeated LedChannel channels = 1;
 }
 
+// Two-point scale calibration: Set calibration on two points
+message ScaleCalibration {
+    float scale_factor1 = 1;
+    float scale_factor2 = 2;
+}
+
+// Calibrate a single load cell with a known weight.
+message CalibrateScaleRequest {
+    uint32 cell = 1;
+    float calibration_weight = 2;
+}
+
 // ---------------------------------------------------------------------------
 // Responses (controller -> display)
 // ---------------------------------------------------------------------------
@@ -150,6 +166,7 @@ message Capabilities {
     bool pressure = 2;
     bool led_control = 3;
     bool tof = 4;
+    bool hardware_scale = 5;
 }
 
 message SystemInfo {

@@ -22,13 +22,15 @@ class GaggiMateClient {
     // Argument is the raw legacy INFO characteristic (JSON), if readable.
     using IncompatibleCallback = std::function<void(const String &info)>;
     using SystemInfoCallback = std::function<void(const char *hardware, const char *version, uint32_t protocolVersion,
-                                                  bool dimming, bool pressure, bool ledControl, bool tof)>;
+                                                  bool dimming, bool pressure, bool ledControl, bool tof, bool hwScale)>;
     using SensorCallback =
         std::function<void(float temperature, float pressure, float puckFlow, float pumpFlow, float puckResistance)>;
     using ButtonCallback = std::function<void(uint8_t index, bool pressed)>;
     using AutotuneResultCallback = std::function<void(float kp, float ki, float kd, float kf)>;
     using VolumetricCallback = std::function<void(float volume)>;
     using TofCallback = std::function<void(uint32_t distance)>;
+    using ScaleCalibrationCallback = std::function<void(const float scaleFactor1, const float scaleFactor2)>;
+    using ScaleMeasurementCallback = std::function<void(const float value)>;
     using ErrorCallback = std::function<void(int code)>;
 
     GaggiMateClient();
@@ -66,6 +68,8 @@ class GaggiMateClient {
     gm::Payload buildPumpModelCoeffs(float a, float b, float c, float d);
     gm::Payload buildAutotune(uint32_t testTime, uint32_t samples, uint32_t heaterWattage);
     gm::Payload buildPressureScale(float scale);
+    gm::Payload buildCalibrateScale(uint8_t cell, float calibrationWeight);
+    gm::Payload buildScaleCalibration(float scaleFactor1, float scaleFactor2);
     gm::Payload buildTare();
     // Pack channel/brightness pairs into one LedControl payload; entries beyond
     // the schema's per-message cap (LedControl.channels max_count) are dropped.
@@ -80,6 +84,8 @@ class GaggiMateClient {
     void sendPumpModelCoeffs(float a, float b, float c, float d);
     void sendAutotune(uint32_t testTime, uint32_t samples, uint32_t heaterWattage);
     void sendPressureScale(float scale);
+    void sendCalibrateScale(uint8_t cell, float calibrationWeight);
+    void sendScaleCalibration(float scaleFactor1, float scaleFactor2);
     void tare();
     // Drive several LED channels in one message (avoids per-channel sends that
     // the outbound queue would coalesce down to a single channel).
@@ -102,6 +108,8 @@ class GaggiMateClient {
     void onAutotuneResult(AutotuneResultCallback cb) { _autotuneResultCb = std::move(cb); }
     void onVolumetricMeasurement(VolumetricCallback cb) { _volumetricCb = std::move(cb); }
     void onTofMeasurement(TofCallback cb) { _tofCb = std::move(cb); }
+    void onScaleMeasurementCallback(ScaleMeasurementCallback cb) { _scaleMeasurementCb = std::move(cb); }
+    void onScaleCalibratedCallback(ScaleCalibrationCallback cb) { _scaleCalibratedCb = std::move(cb); }
     void onError(ErrorCallback cb) { _errorCb = std::move(cb); }
 
   private:
@@ -116,6 +124,8 @@ class GaggiMateClient {
     AutotuneResultCallback _autotuneResultCb;
     VolumetricCallback _volumetricCb;
     TofCallback _tofCb;
+    ScaleMeasurementCallback _scaleMeasurementCb;
+    ScaleCalibrationCallback _scaleCalibratedCb;
     ErrorCallback _errorCb;
 
     void registerHandlers();

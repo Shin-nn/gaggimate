@@ -42,23 +42,31 @@ void GaggiMateController::setup() {
     this->brewBtn = new DigitalInput(_config.brewButtonPin, [this](const bool state) { _comms.sendButtonState(0, state); });
     this->steamBtn = new DigitalInput(_config.steamButtonPin, [this](const bool state) { _comms.sendButtonState(1, state); });
 
-    /*
     this->hardwareScale = new HardwareScale(_config.scaleSdaPin, _config.scaleSda1Pin, _config.scaleSclPin,
-        [this](float scaleFactor1, float scaleFactor2) { _ble.sendScaleCalibration(scaleFactor1, scaleFactor2); });
-    this->hardwareScale->setup();
-    if (this->hardwareScale->isAvailable()) {
-        _config.capabilites.hwScale = true;
-        _ble.registerScaleTareCallback([this]() {
-            this->hardwareScale->tare();
+        [this] (const float v) {
+            _comms.sendScaleMeasurement(v);
+        },
+        [this](float scaleFactor1, float scaleFactor2) {
+            _comms.sendScaleCalibrated(scaleFactor1, scaleFactor2);
         });
 
-        _ble.registerScaleCalibrationCallback([this](float scaleFactor1, float scaleFactor2) {
-            this->hardwareScale->setScaleFactors(scaleFactor1, scaleFactor2);
-        });
-        _ble.registerScaleCalibrateCallback([this](uint8_t scale, float calibration_weight) {
-            this->hardwareScale->calibrateScale(scale, calibration_weight);
-        });
-    }*/
+    if (_config.capabilites.hwScale) {
+        this->hardwareScale->setup();
+        if (this->hardwareScale->isAvailable()) {
+            _config.capabilites.hwScale = true;
+            _comms.onTare([this]() {
+                this->hardwareScale->tare();
+            });
+
+            _comms.onCalibrateScale([this](uint8_t cell, float calibration_weight) {
+                this->hardwareScale->calibrateScale(cell, calibration_weight);
+            });
+
+            _comms.onSetScaleCalibration([this](float scaleFactor1, float scaleFactor2) {
+                this->hardwareScale->setScaleFactors(scaleFactor1, scaleFactor2);
+            });
+        }
+    }
 
     // 4-Pin peripheral port
     if (!Wire.begin(_config.sunriseSdaPin, _config.sunriseSclPin, 400000)) {

@@ -91,6 +91,21 @@ gm::Payload GaggiMateClient::buildPressureScale(float scale) {
     return p;
 }
 
+gm::Payload GaggiMateClient::buildCalibrateScale(uint8_t cell, float calibrationWeight){
+    gm::Payload p = gaggimate_Payload_init_zero;
+    p.which_content = gaggimate_Payload_calibrate_scale_tag;
+    p.content.calibrate_scale.cell = cell;
+    p.content.calibrate_scale.calibration_weight = calibrationWeight;
+    return p;
+}
+gm::Payload GaggiMateClient::buildScaleCalibration(float scaleFactor1, float scaleFactor2){
+    gm::Payload p = gaggimate_Payload_init_zero;
+    p.which_content = gaggimate_Payload_set_scale_calibration_tag;
+    p.content.set_scale_calibration.scale_factor1=scaleFactor1;
+    p.content.set_scale_calibration.scale_factor2=scaleFactor2;
+    return p;
+}
+
 gm::Payload GaggiMateClient::buildTare() {
     gm::Payload p = gaggimate_Payload_init_zero;
     p.which_content = gaggimate_Payload_tare_tag;
@@ -139,6 +154,14 @@ void GaggiMateClient::sendAutotune(uint32_t testTime, uint32_t samples, uint32_t
 
 void GaggiMateClient::sendPressureScale(float scale) { _endpoint.send(buildPressureScale(scale)); }
 
+void GaggiMateClient::sendCalibrateScale(uint8_t cell, float calibrationWeight) {
+    _endpoint.send(buildCalibrateScale(cell, calibrationWeight));
+}
+
+void GaggiMateClient::sendScaleCalibration(float scaleFactor1, float scaleFactor2) {
+    _endpoint.send(buildScaleCalibration(scaleFactor1, scaleFactor2));
+}
+
 void GaggiMateClient::tare() { _endpoint.send(buildTare()); }
 
 void GaggiMateClient::sendLedControl(const LedChannelCommand *channels, size_t count) {
@@ -150,8 +173,9 @@ void GaggiMateClient::registerHandlers() {
         if (_systemInfoCb)
             _systemInfoCb(p.content.system_info.hardware, p.content.system_info.version, p.content.system_info.protocol_version,
                           p.content.system_info.capabilities.dimming, p.content.system_info.capabilities.pressure,
-                          p.content.system_info.capabilities.led_control, p.content.system_info.capabilities.tof);
+                          p.content.system_info.capabilities.led_control, p.content.system_info.capabilities.tof, p.content.system_info.capabilities.hardware_scale);
     });
+
     _endpoint.on(gaggimate_Payload_sensor_tag, [this](const gm::Payload &p) {
         if (!_sensorCb)
             return;

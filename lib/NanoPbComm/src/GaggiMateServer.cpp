@@ -98,6 +98,21 @@ gm::Payload GaggiMateServer::buildVolumetricMeasurement(float volume) {
     return p;
 }
 
+gm::Payload GaggiMateServer::buildScaleMeasurement(float volume){
+    gm::Payload p = gaggimate_Payload_init_zero;
+    p.which_content = gaggimate_Payload_scale_measurement_tag;
+    p.content.volumetric.volume = volume;
+    return p;
+}
+
+gm::Payload GaggiMateServer::buildScaleCalibrated(float scaleFactor1, float scaleFactor2){
+    gm::Payload p = gaggimate_Payload_init_zero;
+    p.which_content = gaggimate_Payload_scale_calibrated_tag;
+    p.content.scale_calibrated.scale_factor1 = scaleFactor1;
+    p.content.scale_calibrated.scale_factor2 = scaleFactor2;
+    return p;
+}
+
 gm::Payload GaggiMateServer::buildTofMeasurement(uint32_t distance) {
     gm::Payload p = gaggimate_Payload_init_zero;
     p.which_content = gaggimate_Payload_tof_tag;
@@ -127,6 +142,12 @@ void GaggiMateServer::sendAutotuneResult(float kp, float ki, float kd, float kf)
 }
 
 void GaggiMateServer::sendVolumetricMeasurement(float volume) { _endpoint.sendUnreliable(buildVolumetricMeasurement(volume)); }
+
+void GaggiMateServer::sendScaleMeasurement(float volume) { _endpoint.sendUnreliable(buildScaleMeasurement(volume)); }
+
+void GaggiMateServer::sendScaleCalibrated(float scaleFactor1, float scaleFactor2){
+    _endpoint.sendUnreliable(buildScaleCalibrated(scaleFactor1, scaleFactor2));
+}
 
 void GaggiMateServer::sendTofMeasurement(uint32_t distance) { _endpoint.sendUnreliable(buildTofMeasurement(distance)); }
 

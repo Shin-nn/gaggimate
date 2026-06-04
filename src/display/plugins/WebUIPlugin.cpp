@@ -126,9 +126,10 @@ void WebUIPlugin::loop() {
         statusDoc["lat"] = -1; // BLE round-trip latency (ms); -1 = not yet measured
 
         if (HardwareScales.isConnected()) {
-            doc["cw"] = HardwareScales.getWeight();
+            statusDoc["cw"] = HardwareScales.getWeight();
         }
-        doc["hs"] = controller->getSystemInfo().capabilities.hwScale;
+
+        statusDoc["hs"] = controller->getSystemInfo().capabilities.hwScale;
 
         if (controller->getClientController()->getClient()->isConnected()) {
             statusDoc["rssi"] = controller->getClientController()->getClient()->getRssi();
@@ -280,15 +281,7 @@ void WebUIPlugin::setupServer() {
                 rxBuffers.erase(client->id());
             } else if (type == WS_EVT_DATA) {
                 handleWebSocketData(server, client, type, arg, data, len);
-            } else if (msgType == "req:scale:tare") {
-                                if (HardwareScales.isConnected()) {
-                                    HardwareScales.tare();
-                                }
-                            } else if (msgType == "req:scale:calibrate") {
-                                if (HardwareScales.isConnected() && doc["cell"].is<uint8_t>() && doc["calWeight"].is<float>()) {
-                                    HardwareScales.calibrate(doc["cell"].as<uint8_t>(), doc["calWeight"].as<float>());
-                                }
-                            }
+            }
         });
     server.addHandler(&ws);
 }
@@ -412,6 +405,14 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                     client->text(buffer);
                 } else if (msgType == "req:flush:start") {
                     handleFlushStart(client->id(), doc);
+                } else if (msgType == "req:scale:tare") {
+                    if (HardwareScales.isConnected()) {
+                        HardwareScales.tare();
+                    }
+                } else if (msgType == "req:scale:calibrate") {
+                    if (HardwareScales.isConnected() && doc["cell"].is<uint8_t>() && doc["calWeight"].is<float>()) {
+                        HardwareScales.calibrate(doc["cell"].as<uint8_t>(), doc["calWeight"].as<float>());
+                    }
                 }
             }
         }

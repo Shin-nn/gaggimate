@@ -357,7 +357,7 @@ void BLEScalePlugin::onMeasurement(float value) const {
     }
 
     // Safe to call controller method
-    controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::BLUETOOTH);
+    controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::MEASUREMENT);
 
     // If the scale driver also provides native flow rate (e.g. Bookoo), emit
     // it on the same tick so consumers get it at the scale's native cadence

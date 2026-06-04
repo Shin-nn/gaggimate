@@ -11,6 +11,7 @@ struct SystemCapabilities {
     bool pressure;
     bool ledControl;
     bool tof;
+    bool hwScale;
 };
 
 struct SystemInfo {
