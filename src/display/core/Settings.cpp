@@ -105,7 +105,7 @@ Settings::Settings() {
     emptyTankDistance = preferences.getInt("sr_ed", 210);
     fullTankDistance = preferences.getInt("sr_fd", 30);
     altRelayFunction = preferences.getInt("alt_relay", ALT_RELAY_GRIND);
-
+    customOTAURL= preferences.getString("custom_ota_url", "");
     String buttonBehaviorStr = preferences.getString("btnb", "brew,steam,water");
     buttonBehavior = explode(buttonBehaviorStr, ',');
 
@@ -219,6 +219,10 @@ void Settings::setVolumetricTarget(bool volumetric_target) {
 
 void Settings::setOTAChannel(const String &otaChannel) {
     this->otaChannel = otaChannel;
+    save();
+}
+void Settings::setCustomOTAUrl(const String &customOtaURL) {
+    this->customOTAURL = customOtaURL;
     save();
 }
 
@@ -526,6 +530,7 @@ void Settings::doSave() {
     preferences.putInt("sr_fd", fullTankDistance);
     preferences.putInt("alt_relay", altRelayFunction);
     preferences.putString("btnb", implode(buttonBehavior, ","));
+    preferences.putString("custom_ota_url", customOTAURL);
 
     preferences.end();
 }
