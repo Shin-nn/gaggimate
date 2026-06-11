@@ -16,6 +16,7 @@ import Card from '../../components/Card.jsx';
 import ProcessControls from './ProcessControls.jsx';
 import CompactProcessControls from './CompactProcessControls.jsx';
 import { getDashboardLayout, DASHBOARD_LAYOUTS } from '../../utils/dashboardManager.js';
+import { computed } from '@preact/signals';
 
 Chart.register(LineController, TimeScale, LinearScale, PointElement, LineElement, Filler, Legend);
 const hwScale = computed(() => machine.value.capabilities.hardwareScale);

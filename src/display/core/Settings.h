@@ -81,6 +81,7 @@ class Settings {
     int getSmartGrindMode() const { return smartGrindMode; }
     String getSmartGrindIp() const { return smartGrindIp; }
     bool isHomeAssistant() const { return homeAssistant; }
+    bool isHardwareScale() const { return hardwareScale; }
     String getHomeAssistantIP() const { return homeAssistantIP; }
     String getHomeAssistantUser() const { return homeAssistantUser; }
     String getHomeAssistantPassword() const { return homeAssistantPassword; }
@@ -232,6 +233,8 @@ class Settings {
     float steamPumpPercentage = DEFAULT_STEAM_PUMP_PERCENTAGE;
     float steamPumpCutoff = DEFAULT_STEAM_PUMP_CUTOFF;
     int historyIndex = 0;
+
+    bool hardwareScale = false;
 
     // Display settings
     int mainBrightness = 16;

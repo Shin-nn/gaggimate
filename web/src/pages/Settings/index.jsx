@@ -18,7 +18,6 @@ import { Tooltip } from '../../components/Tooltip.jsx';
 import { faCrosshairs } from '@fortawesome/free-solid-svg-icons/faCrosshairs';
 
 const ledControl = computed(() => machine.value.capabilities.ledControl);
-const hwScale = computed(() => machine.value.capabilities.hardwareScale);
 const pressureAvailable = computed(() => machine.value.capabilities.pressure);
 const connected = computed(() => machine.value.connected);
 const tofDistance = computed(() => machine.value.status.tofDistance);
@@ -159,6 +158,9 @@ export function Settings() {
       if (key === 'boilerFillActive') {
         value = !formData.boilerFillActive;
       }
+      if (key === 'hardwareScale') {
+        value = !formData.hardwareScale;
+      }
       if (key === 'smartGrindActive') {
         value = !formData.smartGrindActive;
       }
@@ -196,6 +198,10 @@ export function Settings() {
       if (key === 'dashboardLayout') {
         setDashboardLayout(value);
       }
+        console.log({
+            ...formData,
+            [key]: value,
+        });
       setFormData({
         ...formData,
         [key]: value,
@@ -230,6 +236,9 @@ export function Settings() {
     const newSchedules = [...autowakeupSchedules];
     newSchedules[scheduleIndex].days[dayIndex] = enabled;
     setAutoWakeupSchedules(newSchedules);
+  };
+
+  const runCalibration = () => {
   };
 
   const onSubmit = useCallback(
@@ -268,6 +277,7 @@ export function Settings() {
       if (restart) {
         formDataToSubmit.append('restart', '1');
       }
+      console.log(formDataToSubmit)
       const response = await fetch(form.action, {
         method: 'post',
         body: formDataToSubmit,
@@ -1165,6 +1175,7 @@ export function Settings() {
               removeAutoWakeupSchedule={removeAutoWakeupSchedule}
               updateAutoWakeupTime={updateAutoWakeupTime}
               updateAutoWakeupDay={updateAutoWakeupDay}
+              runCalibration={runCalibration}
             />
           </Card>
         </div>

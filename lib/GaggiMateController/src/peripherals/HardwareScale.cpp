@@ -1,5 +1,3 @@
-// filepath: /Users/eric/Developer/gaggimate/lib/GaggiMateController/src/peripherals/HardwareScale.cpp
-
 #include "HardwareScale.h"
 #include <Arduino.h>
 

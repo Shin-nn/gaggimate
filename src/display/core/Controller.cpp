@@ -555,10 +555,14 @@ bool Controller::isReady() const { return !isUpdating() && !isErrorState() && !i
 
 bool Controller::isVolumetricAvailable() const {
 #ifdef NIGHTLY_BUILD
-    return isBluetoothScaleHealthy() || systemInfo.capabilities.dimming;
-#else
-    return isBluetoothScaleHealthy();
+    if (systemInfo.capabilities.dimming) {
+        return systemInfo.capabilities.dimming;
+    }
 #endif
+
+    unsigned long timeSinceLastBluetooth = millis() - lastBluetoothMeasurement;
+    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || hardwareScaleAvailable;
+
 }
 
 void Controller::autotune(int testTime, int samples, int heaterWattage) {
@@ -832,11 +836,11 @@ void Controller::activate() {
     clear();
     comms.tare();
     if (isVolumetricAvailable()) {
+       currentVolumetricSource = VolumetricMeasurementSource::MEASUREMENT;
 #ifdef NIGHTLY_BUILD
-        currentVolumetricSource =
-            isBluetoothScaleHealthy() ? VolumetricMeasurementSource::MEASUREMENT : VolumetricMeasurementSource::FLOW_ESTIMATION;
-#else
-        currentVolumetricSource = VolumetricMeasurementSource::MEASUREMENT;
+        if (!systemInfo.capabilities.dimming) {
+            currentVolumetricSource = VolumetricMeasurementSource::FLOW_ESTIMATION;
+        }
 #endif
         if (mode == MODE_BREW) {
             pluginManager->trigger("controller:brew:prestart");
@@ -992,11 +996,6 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
     if (last != nullptr && !last->isComplete()) {
         last->updateVolume(measurement);
     }
-}
-
-bool Controller::isBluetoothScaleHealthy() const {
-    unsigned long timeSinceLastBluetooth = millis() - lastBluetoothMeasurement;
-    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride;
 }
 
 void Controller::onFlush() {

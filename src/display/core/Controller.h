@@ -89,8 +89,7 @@ class Controller {
     void onProfileSave() const;
     void onProfileSaveAsNew();
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
-    void setVolumetricOverride(bool override) { volumetricOverride = override; }
-    bool isBluetoothScaleHealthy() const;
+    void setHardwareScaleAvailable(bool override) { hardwareScaleAvailable = override; }
     void onFlush();
     int getWaterLevel() const {
         float reversedLevel = static_cast<float>(settings.getEmptyTankDistance()) -
@@ -186,7 +185,7 @@ class Controller {
     bool screenReady = false;
     bool waitingForController = false;
     unsigned long connectStartTime = 0;
-    bool volumetricOverride = false;
+    bool hardwareScaleAvailable = false;
     bool processCompleted = false;
     bool steamReady = false;
     bool sdcard = false;

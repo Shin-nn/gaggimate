@@ -181,7 +181,6 @@ export default class ApiService {
       grindTargetVolume: message.gtv || 0,
       grindTarget: message.gt || 0,
       grindActive: message.gact || false,
-      currentWeight: message.cw || 0,
       bluetoothConnected: message.bc || false,
       process: message.process || null,
       timestamp: new Date(),

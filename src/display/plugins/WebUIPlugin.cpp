@@ -692,6 +692,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["targetWaterTemp"] = settings.getTargetWaterTemp();
     doc["homekit"] = settings.isHomekit();
     doc["homeAssistant"] = settings.isHomeAssistant();
+    doc["hardwareScale"] = settings.isHardwareScale();
     doc["haUser"] = settings.getHomeAssistantUser();
     doc["haPassword"] = settings.getHomeAssistantPassword();
     doc["haIP"] = settings.getHomeAssistantIP();

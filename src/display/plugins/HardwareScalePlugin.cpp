@@ -8,21 +8,21 @@ HardwareScalePlugin::HardwareScalePlugin() = default;
 void HardwareScalePlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
 
-    // pluginManager->on("controller:ready", [this](Event const &) {
-    //     _isAvailable = this->controller->getSystemInfo().capabilities.hwScale;
-    //     _scaleFactor1 = this->controller->getSettings().getScaleFactor1();
-    //     _scaleFactor2 = this->controller->getSettings().getScaleFactor2();
-    //
-    //     ESP_LOGI(LOG_TAG, "Hardware scale available: %s", _isAvailable ? "true" : "false");
-    //
-    //     if (_scaleFactor1 != 0.0f && _scaleFactor2 != 0.0f) {
-    //         this->controller->getClientController()->sendScaleCalibration(_scaleFactor1, _scaleFactor2);
-    //         delay(50);
-    //     }
-    //     this->controller->getClientController()->sendScaleTare();
-    //
-    //     this->controller->setVolumetricOverride(_isAvailable);
-    // });
+    pluginManager->on("controller:ready", [this](Event const &) {
+        _isAvailable = this->controller->getSystemInfo().capabilities.hwScale;
+        _scaleFactor1 = this->controller->getSettings().getScaleFactor1();
+        _scaleFactor2 = this->controller->getSettings().getScaleFactor2();
+
+        ESP_LOGI(LOG_TAG, "Hardware scale available: %s", _isAvailable ? "true" : "false");
+
+        if (_scaleFactor1 != 0.0f && _scaleFactor2 != 0.0f) {
+            this->controller->getClientController()->sendScaleCalibration(_scaleFactor1, _scaleFactor2);
+            delay(50);
+        }
+        this->controller->getClientController()->tare();
+
+        this->controller->setHardwareScaleAvailable(_isAvailable);
+    });
 
     pluginManager->on("controller:brew:start", [this](Event const &) {
        onProcessStart();

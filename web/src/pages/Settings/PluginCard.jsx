@@ -10,6 +10,7 @@ export function PluginCard({
   removeAutoWakeupSchedule,
   updateAutoWakeupTime,
   updateAutoWakeupDay,
+  runCalibration
 }) {
   return (
     <div className='space-y-4'>
@@ -355,6 +356,87 @@ export function PluginCard({
               />
             </div>
           </div>
+        )}
+      </div>
+
+
+        {console.log(formData)}
+      <div className='bg-base-200 rounded-lg p-4'>
+        <div className='flex items-center justify-between'>
+            <span className='text-xl font-medium'>Hardware Scale</span>
+            <input
+                id='hardwareScale'
+                name='hardwareScale'
+                type='checkbox'
+                className='toggle toggle-primary'
+                checked={!!formData.hardwareScale}
+                onChange={onChange('hardwareScale')}
+                aria-label='Enable Hardware scales'
+            />
+        </div>
+        {formData.hardwareScale && (
+            <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
+                <p className='text-sm opacity-70'>
+                    This feature enables hardware scale.
+                </p>
+                <div className='form-control'>
+                    <label htmlFor='hwScaleFactor1' className='mb-2 block text-sm font-medium'>
+                        Scale Factor 1
+                    </label>
+                    <input
+                        id='hwScale-factor1'
+                        name='hwScale-factor1'
+                        type='number'
+                        className='input input-bordered w-full'
+                        placeholder='0'
+                        value={formData.hwScaleFactor1}
+                        onChange={onChange('hwScaleFactor1')}
+                    />
+                </div>
+
+                <div className='form-control'>
+                    <label htmlFor='hwScaleFactor2' className='mb-2 block text-sm font-medium'>
+                        Scale Factor 2
+                    </label>
+                    <input
+                        id='hwScale-factor2'
+                        name='hwScale-factor2'
+                        type='number'
+                        className='input input-bordered w-full'
+                        placeholder='0'
+                        value={formData.hwScaleFactor2}
+                        onChange={onChange('hwScaleFactor2')}
+                    />
+                </div>
+
+
+
+
+                <div className='form-control'>
+                    <label htmlFor='hwScaleWeight' className='mb-2 block text-sm font-medium'>
+                        Weight for calibration
+                    </label>
+                    <input
+                        id='hwScale-weight'
+                        name='hwScale-weight'
+                        type='number'
+                        className='input input-bordered w-full'
+                        placeholder='0'
+                        value={formData.hwScaleWeight}
+                        onChange={onChange('hwScaleWeight')}
+                    />
+                </div>
+
+                <button
+                    type='button'
+                    onClick={runCalibration}
+                    className='btn btn-primary btn-sm'
+                    disabled={!formData.hardwareScale}
+                >
+                    Run calibration
+                </button>
+
+            </div>
         )}
       </div>
     </div>
