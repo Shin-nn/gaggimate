@@ -448,7 +448,8 @@ void WebUIPlugin::handleOTASettings(uint32_t clientId, JsonDocument &request) {
     if (request["update"].as<bool>()) {
         if (!request["channel"].isNull()) {
             controller->getSettings().setOTAChannel(request["channel"].as<String>() == "latest" ? "latest" : "nightly");
-            ota->setReleaseUrl(RELEASE_URL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly"));
+            auto releaseURL = controller->getSettings().getCustomOTAURL().isEmpty() ? RELEASE_URL : controller->getSettings().getCustomOTAURL();
+            ota->setReleaseUrl(releaseURL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly"));
             lastUpdateCheck = 0;
         }
     }
@@ -654,6 +655,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setIntegralGain(request->arg("integralGain").toFloat());
             if (request->hasArg("maxPumpPower"))
                 settings->setMaxPumpPower(request->arg("maxPumpPower").toFloat());
+            if (request->hasArg("customOTAURL"))
+                settings->setCustomOTAUrl(request->arg("customOTAURL"));
             settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled"));
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
@@ -858,6 +861,7 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["hardware"] = controller->getSystemInfo().hardware;
     doc["latestVersion"] = ota->getCurrentVersion();
     doc["channel"] = settings.getOTAChannel();
+    doc["customChannel"] = settings.getOTAChannel();
     doc["updating"] = updating;
     // LittleFS usage metrics
     {
