@@ -7,6 +7,7 @@ HardwareScalePlugin::HardwareScalePlugin() = default;
 
 void HardwareScalePlugin::setup(Controller *controller, PluginManager *pluginManager) {
     this->controller = controller;
+    this->pluginManager = pluginManager;
 
     pluginManager->on("controller:ready", [this](Event const &) {
         _isAvailable = this->controller->getSystemInfo().capabilities.hwScale;
@@ -34,9 +35,18 @@ void HardwareScalePlugin::setup(Controller *controller, PluginManager *pluginMan
         this->onMeasurement(value);
     });
 
-    pluginManager->on("controller:scale:cal_update", [this](Event const &event) {
-        _scaleFactor1 = event.getFloat("scaleFactor1");
-        _scaleFactor2 = event.getFloat("scaleFactor2");
+    pluginManager->on("controller:scale:calibrate-update", [this](Event const &event) {
+        float scaleFactor1 = this->controller->getSettings().getScaleFactor1();
+        float scaleFactor2 = this->controller->getSettings().getScaleFactor2();
+        if (event.getFloat("scaleFactor1") != 0.0f) {
+            scaleFactor1= event.getFloat("scaleFactor1");
+        }
+        if (event.getFloat("scaleFactor2") != 0.0f) {
+            scaleFactor2= event.getFloat("scaleFactor2");
+        }
+        _scaleFactor1 = scaleFactor1;
+        _scaleFactor2 = scaleFactor2;
+
         this->controller->getSettings().setScaleFactors(_scaleFactor1, _scaleFactor2);
     });
 }
@@ -52,6 +62,8 @@ void HardwareScalePlugin::calibrate(uint8_t cell, float calibrationWeight) {
     if (_isAvailable) {
         ESP_LOGI(LOG_TAG, "Calibrating hardware scale: cell %d, weight %.2f", cell, calibrationWeight);
         controller->getClientController()->sendCalibrateScale(cell, calibrationWeight);
+    }else {
+        pluginManager->trigger("controller:scale:calibrate-failed", "reason", "Hardware scale not available");
     }
 }
 

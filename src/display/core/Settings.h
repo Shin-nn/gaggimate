@@ -73,6 +73,7 @@ class Settings {
     bool isHomekit() const { return homekit; }
     bool isVolumetricTarget() const { return volumetricTarget; }
     String getOTAChannel() const { return otaChannel; }
+    String getCustomOTAURL() const { return customOTAURL; }
     String getSavedScale() const { return savedScale; }
     bool isBoilerFillActive() const { return boilerFillActive; }
     int getStartupFillTime() const { return startupFillTime; }
@@ -102,10 +103,27 @@ class Settings {
     float getSteamPumpCutoff() const { return steamPumpCutoff; }
     int getThemeMode() const { return themeMode; }
     int getHistoryIndex() const { return historyIndex; }
-    int getSunriseR() const { return sunriseR; }
-    int getSunriseG() const { return sunriseG; }
-    int getSunriseB() const { return sunriseB; }
-    int getSunriseW() const { return sunriseW; }
+
+    [[deprecated]]
+    int getSunriseR() const {
+        return sunriseR;
+    }
+    [[deprecated]]
+    int getSunriseG() const {
+        return sunriseG;
+    }
+    [[deprecated]]
+    int getSunriseB() const {
+        return sunriseB;
+    }
+    [[deprecated]]
+    int getSunriseW() const {
+        return sunriseW;
+    }
+    String getSunriseIdle() const { return sunriseIdle; }
+    String getSunriseActive() const { return sunriseActive; }
+    String getSunriseFinished() const { return sunriseFinished; }
+    String getSunriseError() const { return sunriseError; }
     int getSunriseExtBrightness() const { return sunriseExtBrightness; }
     int getEmptyTankDistance() const { return emptyTankDistance; }
     int getFullTankDistance() const { return fullTankDistance; }
@@ -121,6 +139,11 @@ class Settings {
     float getScaleFactor1() const { return scaleFactor1; }
     float getScaleFactor2() const { return scaleFactor2; }
     void setTargetBrewTemp(int target_brew_temp);
+    float getCommutationGain() const { return commutationGain; }
+    float getConvergenceGain() const { return convergenceGain; }
+    float getIntegralGain() const { return integralGain; }
+    float getMaxPumpPower() const { return maxPumpPower; }
+
     void setTargetSteamTemp(int target_steam_temp);
     void setTargetWaterTemp(int target_water_temp);
     void setTemperatureOffset(int temperature_offset);
@@ -140,6 +163,7 @@ class Settings {
     void setHomekit(bool homekit);
     void setVolumetricTarget(bool volumetric_target);
     void setOTAChannel(const String &otaChannel);
+    void setCustomOTAUrl(const String &otaUrl);
     void setSavedScale(const String &savedScale);
     void setBoilerFillActive(bool boiler_fill_active);
     void setStartupFillTime(int startup_fill_time);
@@ -170,19 +194,33 @@ class Settings {
     void setSteamPumpCutoff(float steam_pump_cutoff);
     void setThemeMode(int theme_mode);
     void setHistoryIndex(int history_index);
+    [[deprecated]]
     void setSunriseR(int sunrise_r);
+    [[deprecated]]
     void setSunriseG(int sunrise_g);
+    [[deprecated]]
     void setSunriseB(int sunrise_b);
+    [[deprecated]]
     void setSunriseW(int sunrise_w);
+    void setSunriseIdle(String hexColor);
+    void setSunriseActive(String hexColor);
+    void setSunriseFinished(String hexColor);
+    void setSunriseError(String hexColor);
     void setSunriseExtBrightness(int sunrise_ext_brightness);
     void setEmptyTankDistance(int empty_tank_distance);
     void setFullTankDistance(int full_tank_distance);
+    void setHardwareScale(bool enabled);
     void setScaleFactors(float scale_factor_1, float scale_factor_2);
     void setAltRelayFunction(int alt_relay_function);
     void setAutoWakeupEnabled(bool enabled);
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
     void setButtonBehavior(int index, String behavior);
     void setButtonBehaviorList(const std::vector<String> &behavior_list);
+
+    void setCommutationGain(float commutationGain);
+    void setConvergenceGain(float convergenceGain);
+    void setIntegralGain(float integralGain);
+    void setMaxPumpPower(float maxPumpPower);
 
   private:
     Preferences preferences;
@@ -204,7 +242,6 @@ class Settings {
     std::vector<AutoWakeupSchedule> autowakeupSchedules;
     int standbyTimeout = DEFAULT_STANDBY_TIMEOUT_MS;
     String pid = DEFAULT_PID;
-    String pumpModelCoeffs = DEFAULT_PUMP_MODEL_COEFFS;
     String wifiSsid = "";
     String wifiPassword = "";
     String mdnsName = DEFAULT_MDNS_NAME;
@@ -228,6 +265,7 @@ class Settings {
     String timezone = DEFAULT_TIMEZONE;
     bool clock24hFormat = true;
     String otaChannel = DEFAULT_OTA_CHANNEL;
+    String customOTAURL = "";
     std::vector<String> favoritedProfiles;
     std::vector<String> profileOrder; // persisted profile ordering
     float steamPumpPercentage = DEFAULT_STEAM_PUMP_PERCENTAGE;
@@ -248,11 +286,23 @@ class Settings {
     int sunriseG = 0;
     int sunriseB = 255;
     int sunriseW = 50;
+    String sunriseIdle = "#00FFFF";
+    String sunriseActive = "#0000FF";
+    String sunriseFinished = "#00FF00";
+    String sunriseError = "#FF0000";
     int sunriseExtBrightness = 255;
     int emptyTankDistance = 200;
     int fullTankDistance = 50;
+
     int altRelayFunction = ALT_RELAY_GRIND; // Default to grind
     std::vector<String> buttonBehavior;
+
+    // Pump settings
+    String pumpModelCoeffs = DEFAULT_PUMP_MODEL_COEFFS;
+    float commutationGain = DEFAULT_COMMUTATION_GAIN;
+    float convergenceGain = DEFAULT_CONVERGENCE_GAIN;
+    float integralGain = DEFAULT_INTEGRAL_GAIN;
+    float maxPumpPower = 1.0f;
 
     // Hardware scale settings
     float scaleFactor1 = 0.0f;

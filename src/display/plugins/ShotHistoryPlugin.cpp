@@ -271,6 +271,7 @@ void ShotHistoryPlugin::startRecording() {
     lastStableWeight = 0.0f;
     currentEstimatedWeight = 0.0f;
     currentBluetoothFlow = 0.0f;
+    lastBluetoothWeight = 0.0f;
     currentProfileName = controller->getProfileManager()->getSelectedProfile().label;
     recording = true;
     extendedRecording = false;
@@ -357,8 +358,8 @@ uint16_t ShotHistoryPlugin::getSystemInfo() {
     }
 
     // Bit 2: Bluetooth scale connected
-    if (controller != nullptr && controller->isBluetoothScaleHealthy()) {
-        systemInfo |= SYSTEM_INFO_BLUETOOTH_SCALE_CONNECTED;
+    if (controller != nullptr && controller->isVolumetricAvailable()) {
+        systemInfo |= SYSTEM_INFO_SCALE_CONNECTED;
     }
 
     // Bit 3: Volumetric available

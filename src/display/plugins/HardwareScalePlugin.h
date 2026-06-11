@@ -29,6 +29,7 @@ class HardwareScalePlugin : public Plugin {
     float _scaleFactor1 = 1.0f, _scaleFactor2 = 1.0f;
 
     Controller *controller = nullptr;
+    PluginManager *pluginManager = nullptr;
 };
 
 extern HardwareScalePlugin HardwareScales;

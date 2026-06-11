@@ -144,9 +144,6 @@ void BLEScalePlugin::update() {
         hasConnectedScale = scale->isConnected();
     }
 
-    if (controller->isVolumetricAvailable())
-        controller->setVolumetricOverride(hasConnectedScale);
-
     if (!active)
         return;
 

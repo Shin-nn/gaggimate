@@ -6,6 +6,8 @@
 #include <DNSServer.h>
 
 #include "GitHubOTA.h"
+#include "display/core/Event.h"
+
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -25,6 +27,7 @@ class WebUIPlugin : public Plugin {
   public:
     WebUIPlugin();
     void setup(Controller *controller, PluginManager *pluginManager) override;
+    String createOtaURL();
     void loop() override;
 
   private:
@@ -51,6 +54,9 @@ class WebUIPlugin : public Plugin {
     void updateOTAProgress(uint8_t phase, int progress);
     void sendAutotuneResult();
     void sendAutotuneFailed();
+
+    void sendScaleCalibrationFailed(const String & reason);
+    void sendScaleCalibrationResult(float scaleFactor1, float scaleFactor2);
 
     // Broadcast a JsonDocument to all WebSocket clients with a single internal
     // allocation. `doc.as<String>()` builds an Arduino String on the internal

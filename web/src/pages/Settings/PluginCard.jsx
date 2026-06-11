@@ -1,6 +1,16 @@
 import { faTrashCan } from '@fortawesome/free-solid-svg-icons/faTrashCan';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import homekitImage from '../../assets/homekit.png';
+import { faCalendarDays } from '@fortawesome/free-solid-svg-icons/faCalendarDays';
+import { computed } from '@preact/signals';
+import { machine } from '../../services/ApiService.js';
+import {InputGroupField} from "../../components/SettingsFormField.jsx";
+import {useEffect} from "preact/hooks";
+import {OverviewChart} from "../../components/OverviewChart.jsx";
+import {Spinner} from "../../components/Spinner.jsx";
+
+const gearpumpAddon = computed(() => machine.value.capabilities.gearpumpAddon);
+
 
 export function PluginCard({
   formData,
@@ -10,7 +20,10 @@ export function PluginCard({
   removeAutoWakeupSchedule,
   updateAutoWakeupTime,
   updateAutoWakeupDay,
-  runCalibration
+  runCalibration,
+  calibrationActive,
+  calibrationFailed,
+  calibrationResult
 }) {
   return (
     <div className='space-y-4'>
@@ -37,23 +50,32 @@ export function PluginCard({
               <label className='mb-2 block text-sm font-medium'>Auto Wakeup Schedule</label>
               <div className='space-y-2'>
                 {autowakeupSchedules?.map((schedule, scheduleIndex) => (
-                  <div key={scheduleIndex} className='flex flex-wrap items-center gap-1'>
+                  <div
+                    key={scheduleIndex}
+                    className='flex flex-wrap items-center gap-1 md:flex-nowrap'
+                  >
                     {/* Time input */}
-                    <input
-                      type='time'
-                      className='input input-bordered input-sm w-auto min-w-0 pr-6'
-                      value={schedule.time}
-                      onChange={e => updateAutoWakeupTime(scheduleIndex, e.target.value)}
-                      disabled={!formData.autowakeupEnabled}
-                    />
+                    <div className='grow-1 text-center sm:text-start'>
+                      <input
+                        type='time'
+                        className='input input-bordered input-sm md:input-md w-auto min-w-0 pr-6 text-center'
+                        value={schedule.time}
+                        onChange={e => updateAutoWakeupTime(scheduleIndex, e.target.value)}
+                        disabled={!formData.autowakeupEnabled}
+                      />
+                    </div>
 
                     {/* Days toggle buttons */}
-                    <div className='join' role='group' aria-label='Days of week selection'>
+                    <div
+                      className='join flex grow-8'
+                      role='group'
+                      aria-label='Days of week selection'
+                    >
                       {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((dayLabel, dayIndex) => (
                         <button
                           key={dayIndex}
                           type='button'
-                          className={`join-item btn btn-xs ${schedule.days[dayIndex] ? 'btn-primary' : 'btn-outline'}`}
+                          className={`join-item btn btn-sm md:btn-md flex-grow ${schedule.days[dayIndex] ? 'btn-primary' : 'btn-neutral text-neutral-content/20'}`}
                           onClick={() =>
                             updateAutoWakeupDay(scheduleIndex, dayIndex, !schedule.days[dayIndex])
                           }
@@ -86,24 +108,23 @@ export function PluginCard({
                         </button>
                       ))}
                     </div>
-
                     {/* Delete button */}
                     {autowakeupSchedules.length > 1 ? (
                       <button
                         type='button'
                         onClick={() => removeAutoWakeupSchedule(scheduleIndex)}
-                        className='btn btn-ghost btn-xs'
+                        className='btn btn-ghost btn-sm md:btn-md grow-1'
                         disabled={!formData.autowakeupEnabled}
                         title='Delete this schedule'
                       >
-                        <FontAwesomeIcon icon={faTrashCan} className='text-xs' />
+                        <FontAwesomeIcon icon={faTrashCan} className='text-base' />
                       </button>
                     ) : (
                       <div
-                        className='btn btn-ghost btn-xs cursor-not-allowed opacity-30'
+                        className='btn btn-ghost btn-sm md:btn-md grow-1 cursor-not-allowed opacity-30'
                         title='Cannot delete the last schedule'
                       >
-                        <FontAwesomeIcon icon={faTrashCan} className='text-xs' />
+                        <FontAwesomeIcon icon={faTrashCan} className='text-base' />
                       </div>
                     )}
                   </div>
@@ -111,10 +132,12 @@ export function PluginCard({
                 <button
                   type='button'
                   onClick={addAutoWakeupSchedule}
-                  className='btn btn-primary btn-sm'
+                  className='btn btn-primary btn-sm md:btn-md mt-2'
                   disabled={!formData.autowakeupEnabled}
+                  aria-label='Add schedule'
+                  title='Add schedule'
                 >
-                  Add Schedule
+                  <FontAwesomeIcon icon={faCalendarDays} />
                 </button>
               </div>
             </div>
@@ -359,14 +382,13 @@ export function PluginCard({
         )}
       </div>
 
-
-        {console.log(formData)}
       <div className='bg-base-200 rounded-lg p-4'>
         <div className='flex items-center justify-between'>
             <span className='text-xl font-medium'>Hardware Scale</span>
             <input
                 id='hardwareScale'
                 name='hardwareScale'
+                value='hardwareScale'
                 type='checkbox'
                 className='toggle toggle-primary'
                 checked={!!formData.hardwareScale}
@@ -384,13 +406,13 @@ export function PluginCard({
                         Scale Factor 1
                     </label>
                     <input
-                        id='hwScale-factor1'
-                        name='hwScale-factor1'
+                        id='scaleFactor1'
+                        name='scaleFactor1'
                         type='number'
                         className='input input-bordered w-full'
                         placeholder='0'
-                        value={formData.hwScaleFactor1}
-                        onChange={onChange('hwScaleFactor1')}
+                        value={formData.scaleFactor1}
+                        onChange={onChange('scaleFactor1')}
                     />
                 </div>
 
@@ -399,32 +421,53 @@ export function PluginCard({
                         Scale Factor 2
                     </label>
                     <input
-                        id='hwScale-factor2'
-                        name='hwScale-factor2'
+                        id='scaleFactor2'
+                        name='scaleFactor2'
                         type='number'
                         className='input input-bordered w-full'
                         placeholder='0'
-                        value={formData.hwScaleFactor2}
-                        onChange={onChange('hwScaleFactor2')}
+                        value={formData.scaleFactor2}
+                        onChange={onChange('scaleFactor2')}
                     />
                 </div>
 
+                <p className='text-sm opacity-70'>
+                    Auto calibration options
+                </p>
 
-
-
-                <div className='form-control'>
-                    <label htmlFor='hwScaleWeight' className='mb-2 block text-sm font-medium'>
-                        Weight for calibration
-                    </label>
-                    <input
-                        id='hwScale-weight'
-                        name='hwScale-weight'
-                        type='number'
-                        className='input input-bordered w-full'
-                        placeholder='0'
-                        value={formData.hwScaleWeight}
-                        onChange={onChange('hwScaleWeight')}
-                    />
+                <div className='grid grid-cols-2 gap-4'>
+                    <InputGroupField
+                        label='Weight for scale 1 calibration'
+                        htmlFor='scaleWeight1'
+                        unit='g'
+                        unitAriaLabel='grams'
+                    >
+                        <input
+                            id='scaleWeight1'
+                            name='scaleWeight1'
+                            type='number'
+                            className='grow'
+                            placeholder='0'
+                            value={formData.scaleWeight1}
+                            onChange={onChange('scaleWeight1')}
+                        />
+                    </InputGroupField>
+                    <InputGroupField
+                    label='Weight for scale 2 calibration'
+                    htmlFor='scaleWeight2'
+                    unit='g'
+                    unitAriaLabel='grams'
+                    >
+                        <input
+                            id='scaleWeight2'
+                            name='scaleWeight2'
+                            type='number'
+                            className='grow'
+                            placeholder='0'
+                            value={formData.scaleWeight2}
+                            onChange={onChange('scaleWeight2')}
+                        />
+                    </InputGroupField>
                 </div>
 
                 <button
@@ -435,10 +478,134 @@ export function PluginCard({
                 >
                     Run calibration
                 </button>
+                {calibrationActive && (
+                    <div className='space-y-4'>
+                        <div className='flex flex-col items-center justify-center space-y-4 py-4'>
+                            <div className='flex items-center space-x-3'>
+                                <Spinner size={8} />
+                                <span className='text-lg font-medium'>Calibration in Progress</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {calibrationFailed && (
+                    <div className='space-y-4 text-center'>
+                        <div className='alert alert-error mx-auto max-w-md'>
+                            <div>
+                                <h3 className='font-bold'>Calibration Failed</h3>
+                                <div className='text-sm'>
+                                    {calibrationFailed}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {calibrationResult && (
+                    <div className='space-y-4 text-center'>
+                        <div className='alert alert-success mx-auto max-w-md'>
+                            <div>
+                                <h3 className='font-bold'>Calibration Success</h3>
+                                <div className='text-sm'>
+                                    Computed factor 1: {calibrationResult.scaleFactor1}
+                                </div>
+                                <div className='text-sm'>
+                                    Computed factor 2: {calibrationResult.scaleFactor2}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
             </div>
         )}
       </div>
+
+      {gearpumpAddon.value && (
+        <div className='bg-base-200 rounded-lg p-4'>
+          <div className='flex items-center justify-between'>
+            <span className='text-xl font-medium'>BLDC Pump Settings</span>
+          </div>
+          <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
+            <p className='text-sm opacity-70'>
+              The BLDC pump addon was detected in your system. You can change the pump control
+              characteristics using the values below.
+            </p>
+
+            <div className='form-control'>
+              <label htmlFor='commutationGain' className='mb-2 block text-sm font-medium'>
+                Commutation Gain
+              </label>
+              <input
+                id='commutationGain'
+                name='commutationGain'
+                type='number'
+                className='input input-bordered w-full'
+                placeholder='0'
+                min='0'
+                max='100'
+                step='any'
+                value={formData.commutationGain?.toString()}
+                onChange={onChange('commutationGain')}
+              />
+            </div>
+
+            <div className='form-control'>
+              <label htmlFor='convergenceGain' className='mb-2 block text-sm font-medium'>
+                Convergence Gain
+              </label>
+              <input
+                id='convergenceGain'
+                name='convergenceGain'
+                type='number'
+                className='input input-bordered w-full'
+                placeholder='0'
+                min='0'
+                max='100'
+                step='any'
+                value={formData.convergenceGain?.toString()}
+                onChange={onChange('convergenceGain')}
+              />
+            </div>
+
+            <div className='form-control'>
+              <label htmlFor='integralGain' className='mb-2 block text-sm font-medium'>
+                Integral Gain
+              </label>
+              <input
+                id='integralGain'
+                name='integralGain'
+                type='number'
+                className='input input-bordered w-full'
+                placeholder='0'
+                min='0'
+                max='100'
+                step='any'
+                value={formData.integralGain?.toString()}
+                onChange={onChange('integralGain')}
+              />
+            </div>
+            <div className='form-control'>
+              <label htmlFor='maxPumpPower' className='mb-2 block text-sm font-medium'>
+                Maximum Pump Power (0 - 1)
+              </label>
+              <input
+                id='maxPumpPower'
+                name='maxPumpPower'
+                type='number'
+                placeholder='0'
+                min='0'
+                max='1'
+                step='any'
+                className='input input-bordered w-full'
+                value={formData.maxPumpPower?.toString()}
+                onChange={onChange('maxPumpPower')}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

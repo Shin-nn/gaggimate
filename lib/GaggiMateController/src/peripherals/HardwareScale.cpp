@@ -23,14 +23,14 @@ void HardwareScale::setup() {
     pinMode(_data_pin2, INPUT);
     pinMode(_clock_pin, OUTPUT);
     digitalWrite(_clock_pin, LOW);
-    ESP_LOGV(LOG_TAG, "Initializing hardware scale on DATA: %d, CLOCK: %d", _data_pin, _clock_pin);
+    ESP_LOGI(LOG_TAG, "Initializing hardware scale on DATA: %d, CLOCK: %d", _data_pin2, _clock_pin);
     
     long start = millis();
     while (!isReady() && (millis() - start) < MAX_STARTUP_WAIT_MS) {
             delay(10);
     }
     if (!isReady()) {
-        ESP_LOGE(LOG_TAG, "HX711 modules (%d, %d) not ready after max wait time, aborting setup", digitalRead(_data_pin1), digitalRead(_data_pin2));
+        ESP_LOGE(LOG_TAG, "HX711 modules (%d) not ready after max wait time, aborting setup", digitalRead(_data_pin2));
         is_initialized = false;
         return;
     } else {
@@ -44,7 +44,7 @@ void HardwareScale::setup() {
             delay(10);
         }
         if (!isReady()) {
-            ESP_LOGE(LOG_TAG, "HX711 modules (%d, %d) not ready after max wait time, aborting setup", digitalRead(_data_pin1), digitalRead(_data_pin2));
+            ESP_LOGE(LOG_TAG, "HX711 modules (%d, %d) not ready after max wait time, aborting setup", digitalRead(_data_pin2));
             is_initialized = false;
             return;
         }
@@ -60,7 +60,7 @@ void HardwareScale::setup() {
     xTaskCreate(loopTask, "HardwareScale::loop", configMINIMAL_STACK_SIZE * 4, this, 1, &taskHandle);
 }
 
-bool HardwareScale::isReady() { return digitalRead(_data_pin1) == LOW && digitalRead(_data_pin2) == LOW; }
+bool HardwareScale::isReady() { return digitalRead(_data_pin2) == LOW; }
 
 HardwareScale::RawReading HardwareScale::readRaw() {
     unsigned long value1 = 0;
@@ -75,14 +75,32 @@ HardwareScale::RawReading HardwareScale::readRaw() {
     for (int8_t i = 23; i >= 0; i--) {
         digitalWrite(_clock_pin, HIGH);
         delayMicroseconds(1);
-        value1 |= (digitalRead(_data_pin1) << i);
+        // value1 |= (digitalRead(_data_pin1) << i);
+        value1 |= (digitalRead(_data_pin2) << i);
+        digitalWrite(_clock_pin, LOW);
+        delayMicroseconds(1);
+    }
+
+    // Set gain for next reading
+    for (uint8_t i = 0; i < 1; ++i) {
+        digitalWrite(_clock_pin, HIGH);
+        delayMicroseconds(1);
+        digitalWrite(_clock_pin, LOW);
+        delayMicroseconds(1);
+    }
+
+    // Read 24 bits
+    for (int8_t i = 23; i >= 0; i--) {
+        digitalWrite(_clock_pin, HIGH);
+        delayMicroseconds(1);
+        // value1 |= (digitalRead(_data_pin1) << i);
         value2 |= (digitalRead(_data_pin2) << i);
         digitalWrite(_clock_pin, LOW);
         delayMicroseconds(1);
     }
 
     // Set gain for next reading
-    for (uint8_t i = 0; i < (HX711_GAIN == 128 ? 1 : (HX711_GAIN == 64 ? 3 : 2)); ++i) {
+    for (uint8_t i = 0; i < 3; ++i) {
         digitalWrite(_clock_pin, HIGH);
         delayMicroseconds(1);
         digitalWrite(_clock_pin, LOW);
