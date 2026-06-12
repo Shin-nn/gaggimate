@@ -708,7 +708,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setMaxPumpPower(request->arg("maxPumpPower").toFloat());
             if (request->hasArg("customOTAURL")) {
                 settings->setCustomOTAUrl(request->arg("customOTAURL"));
-                ota->setReleaseUrl(request->arg("customOTAURL"));
+                ota->setReleaseUrl(createOtaURL()   );
                 lastUpdateCheck = 0;
             }
             if (request->hasArg("buttonBehavior"))
