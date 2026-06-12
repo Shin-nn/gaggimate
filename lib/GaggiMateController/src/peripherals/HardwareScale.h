@@ -6,7 +6,7 @@
 
 constexpr int SCALE_READ_INTERVAL_MS = 100;
 
-using scale_reading_callback_t = std::function<void(float)>;
+using scale_reading_callback_t = std::function<void(float w, float w1, float w2)>;
 using scale_configuration_callback_t = std::function<void(float scaleFactor1, float scaleFactor2)>;
 using void_callback_t = std::function<void()>;
 
@@ -52,7 +52,7 @@ class HardwareScale {
         static void loopTask(void *arg);
         
         RawReading readRaw();
-        float convertRawToWeight(const RawReading &raw) const;
+        std::pair<float, float> convertRawToWeight(const RawReading &raw) const;
 };
 
 #endif // HARDWARESCALE_H

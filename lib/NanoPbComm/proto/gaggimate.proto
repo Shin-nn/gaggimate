@@ -56,7 +56,7 @@ message Payload {
         TofMeasurement tof = 25;
         Error error = 26;
         ScaleCalibration scale_calibrated = 27;
-        VolumetricMeasurement scale_measurement = 28;
+        ScaleMeasurement scale_measurement = 28;
     }
 }
 
@@ -213,6 +213,12 @@ message AutotuneResult {
     float ki = 2;
     float kd = 3;
     float kf = 4;
+}
+
+message ScaleMeasurement {
+    float weight = 1;
+    float weight1 = 2;
+    float weight2 = 3;
 }
 
 message VolumetricMeasurement {

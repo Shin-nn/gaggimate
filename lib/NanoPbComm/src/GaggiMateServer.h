@@ -45,7 +45,7 @@ class GaggiMateServer {
     gm::Payload buildButtonState(uint8_t index, bool pressed);
     gm::Payload buildAutotuneResult(float kp, float ki, float kd, float kf);
     gm::Payload buildVolumetricMeasurement(float volume);
-    gm::Payload buildScaleMeasurement(float volume);
+    gm::Payload buildScaleMeasurement(float weight, float weight1, float weight2);
     gm::Payload buildScaleCalibrated(float scaleFactor1, float scaleFactor2);
     gm::Payload buildTofMeasurement(uint32_t distance);
     gm::Payload buildError(int code);
@@ -55,7 +55,7 @@ class GaggiMateServer {
     void sendButtonState(uint8_t index, bool pressed);
     void sendAutotuneResult(float kp, float ki, float kd, float kf);
     void sendVolumetricMeasurement(float volume);
-    void sendScaleMeasurement(float volume);
+    void sendScaleMeasurement(float weight, float weight1, float weight2);
     void sendScaleCalibrated(float scaleFactor1, float scaleFactor2);
     void sendTofMeasurement(uint32_t distance);
     void sendError(int code);

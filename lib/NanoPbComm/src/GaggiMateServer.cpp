@@ -95,10 +95,12 @@ gm::Payload GaggiMateServer::buildVolumetricMeasurement(float volume) {
     return p;
 }
 
-gm::Payload GaggiMateServer::buildScaleMeasurement(float volume){
+gm::Payload GaggiMateServer::buildScaleMeasurement(float weight, float weight1, float weight2){
     gm::Payload p = gaggimate_Payload_init_zero;
     p.which_content = gaggimate_Payload_scale_measurement_tag;
-    p.content.volumetric.volume = volume;
+    p.content.scale_measurement.weight = weight;
+    p.content.scale_measurement.weight1 = weight1;
+    p.content.scale_measurement.weight2 = weight2;
     return p;
 }
 
@@ -140,7 +142,9 @@ void GaggiMateServer::sendAutotuneResult(float kp, float ki, float kd, float kf)
 
 void GaggiMateServer::sendVolumetricMeasurement(float volume) { _endpoint.sendUnreliable(buildVolumetricMeasurement(volume)); }
 
-void GaggiMateServer::sendScaleMeasurement(float volume) { _endpoint.sendUnreliable(buildScaleMeasurement(volume)); }
+void GaggiMateServer::sendScaleMeasurement(float weight, float weight1, float weight2) {
+    _endpoint.sendUnreliable(buildScaleMeasurement(weight, weight1, weight2));
+}
 
 void GaggiMateServer::sendScaleCalibrated(float scaleFactor1, float scaleFactor2){
     _endpoint.sendUnreliable(buildScaleCalibrated(scaleFactor1, scaleFactor2));

@@ -29,12 +29,6 @@ void HardwareScalePlugin::setup(Controller *controller, PluginManager *pluginMan
        onProcessStart();
     });
 
-    pluginManager->on("controller:scale:measurement", [this](Event const &event) {
-        float value = event.getFloat("value");
-        ESP_LOGI(LOG_TAG, "Scale measurement: %.2f", value);
-        this->onMeasurement(value);
-    });
-
     pluginManager->on("controller:scale:calibrate-update", [this](Event const &event) {
         float scaleFactor1 = this->controller->getSettings().getScaleFactor1();
         float scaleFactor2 = this->controller->getSettings().getScaleFactor2();
@@ -75,9 +69,4 @@ void HardwareScalePlugin::onProcessStart() {
 
         ESP_LOGI(LOG_TAG, "Scale process start completed successfully");
     }
-}
-
-void HardwareScalePlugin::onMeasurement(float value) {
-    this->_lastMeasurement = value;
-    controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::MEASUREMENT);
 }

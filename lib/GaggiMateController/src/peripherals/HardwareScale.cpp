@@ -23,14 +23,14 @@ void HardwareScale::setup() {
     pinMode(_data_pin2, INPUT);
     pinMode(_clock_pin, OUTPUT);
     digitalWrite(_clock_pin, LOW);
-    ESP_LOGI(LOG_TAG, "Initializing hardware scale on DATA: %d, CLOCK: %d", _data_pin2, _clock_pin);
+    ESP_LOGV(LOG_TAG, "Initializing hardware scale on DATA: %d, CLOCK: %d", _data_pin, _clock_pin);
     
     long start = millis();
     while (!isReady() && (millis() - start) < MAX_STARTUP_WAIT_MS) {
             delay(10);
     }
     if (!isReady()) {
-        ESP_LOGE(LOG_TAG, "HX711 modules (%d) not ready after max wait time, aborting setup", digitalRead(_data_pin2));
+        ESP_LOGE(LOG_TAG, "HX711 modules (%d, %d) not ready after max wait time, aborting setup", digitalRead(_data_pin1), digitalRead(_data_pin2));
         is_initialized = false;
         return;
     } else {
@@ -44,7 +44,7 @@ void HardwareScale::setup() {
             delay(10);
         }
         if (!isReady()) {
-            ESP_LOGE(LOG_TAG, "HX711 modules (%d, %d) not ready after max wait time, aborting setup", digitalRead(_data_pin2));
+            ESP_LOGE(LOG_TAG, "HX711 modules (%d, %d) not ready after max wait time, aborting setup", digitalRead(_data_pin1), digitalRead(_data_pin2));
             is_initialized = false;
             return;
         }
@@ -60,7 +60,7 @@ void HardwareScale::setup() {
     xTaskCreate(loopTask, "HardwareScale::loop", configMINIMAL_STACK_SIZE * 4, this, 1, &taskHandle);
 }
 
-bool HardwareScale::isReady() { return digitalRead(_data_pin2) == LOW; }
+bool HardwareScale::isReady() { return digitalRead(_data_pin1) == LOW && digitalRead(_data_pin2) == LOW; }
 
 HardwareScale::RawReading HardwareScale::readRaw() {
     unsigned long value1 = 0;
@@ -75,32 +75,14 @@ HardwareScale::RawReading HardwareScale::readRaw() {
     for (int8_t i = 23; i >= 0; i--) {
         digitalWrite(_clock_pin, HIGH);
         delayMicroseconds(1);
-        // value1 |= (digitalRead(_data_pin1) << i);
-        value1 |= (digitalRead(_data_pin2) << i);
-        digitalWrite(_clock_pin, LOW);
-        delayMicroseconds(1);
-    }
-
-    // Set gain for next reading
-    for (uint8_t i = 0; i < 1; ++i) {
-        digitalWrite(_clock_pin, HIGH);
-        delayMicroseconds(1);
-        digitalWrite(_clock_pin, LOW);
-        delayMicroseconds(1);
-    }
-
-    // Read 24 bits
-    for (int8_t i = 23; i >= 0; i--) {
-        digitalWrite(_clock_pin, HIGH);
-        delayMicroseconds(1);
-        // value1 |= (digitalRead(_data_pin1) << i);
+        value1 |= (digitalRead(_data_pin1) << i);
         value2 |= (digitalRead(_data_pin2) << i);
         digitalWrite(_clock_pin, LOW);
         delayMicroseconds(1);
     }
 
     // Set gain for next reading
-    for (uint8_t i = 0; i < 3; ++i) {
+    for (uint8_t i = 0; i < (HX711_GAIN == 128 ? 1 : (HX711_GAIN == 64 ? 3 : 2)); ++i) {
         digitalWrite(_clock_pin, HIGH);
         delayMicroseconds(1);
         digitalWrite(_clock_pin, LOW);
@@ -121,11 +103,10 @@ HardwareScale::RawReading HardwareScale::readRaw() {
     return {static_cast<long>(value1), static_cast<long>(value2)};
 }
 
-float HardwareScale::convertRawToWeight(const RawReading &raw) const {
-    // throw away the bottom 7 bits, as we only have ~17 effective bits
+std::pair<float, float> HardwareScale::convertRawToWeight(const RawReading &raw) const {
     float weight1 = (static_cast<float>(raw.value1) - _offset1) / _scale_factor1;
     float weight2 = (static_cast<float>(raw.value2) - _offset2) / _scale_factor2;
-    return std::clamp(std::round((weight1 + weight2) * 100.0f) / 100.0f, -1.0f * MAX_SCALE_GRAMS, MAX_SCALE_GRAMS);
+    return std::make_pair(weight1, weight2);
 }
 
 float HardwareScale::getWeight() const {
@@ -138,12 +119,13 @@ void HardwareScale::loop() {
     }
 
     _raw_weight = readRaw();
-    ESP_LOGI(LOG_TAG, "Raw Scale Reading: %ld, %ld", _raw_weight.value1, _raw_weight.value2);
-    float reading = convertRawToWeight(_raw_weight);
+    ESP_LOGD(LOG_TAG, "Raw Scale Reading: %ld, %ld", _raw_weight.value1, _raw_weight.value2);
+    auto [weight1, weight2] = convertRawToWeight(_raw_weight);
+    auto reading = std::clamp(std::round((weight1 + weight2) * 100.0f) / 100.0f, -1.0f * MAX_SCALE_GRAMS, MAX_SCALE_GRAMS);
     _weight = 0.5f * reading + 0.5f * _weight;
     _weight = std::clamp(_weight, -1.0f * MAX_SCALE_GRAMS, MAX_SCALE_GRAMS);
-    ESP_LOGI(LOG_TAG, "Scale Reading: %0.2f, Smoothed Weight: %0.2f", reading, _weight);
-    _reading_callback(_weight);
+    ESP_LOGD(LOG_TAG, "Scale Reading: %0.2f, Smoothed Weight: %0.2f", reading, _weight);
+    _reading_callback(_weight, weight1, weight2);
 }
 
 void HardwareScale::setScaleFactors(float scale_factor1, float scale_factor2) {

@@ -19,7 +19,8 @@ import { getDashboardLayout, DASHBOARD_LAYOUTS } from '../../utils/dashboardMana
 import { computed } from '@preact/signals';
 
 Chart.register(LineController, TimeScale, LinearScale, PointElement, LineElement, Filler, Legend);
-const hwScale = computed(() => machine.value.capabilities.hardwareScale);
+
+const status = computed(() => machine.value.status);
 
 export function Home() {
   const [dashboardLayout, setDashboardLayout] = useState(DASHBOARD_LAYOUTS.ORDER_FIRST);
@@ -86,12 +87,11 @@ export function Home() {
           title='Temperature & Pressure Chart'
           fullHeight={true}
         >
-            {console.log(hwScale.value)}
-          {hwScale.value && (
+          {status.value.volumetricAvailable&& (
               <div className="p-6 sm:col-span-12 md:col-span-4">
                 <dl>
                   <dt className="text-xl md:text-2xl font-bold">
-                    {hwScale.value.currentWeight?.toFixed(1) || 0}g <a class="btn" href="" onClick={() => tareScale()}><i className="fa-solid fa-scale-unbalanced ml-2"></i></a>
+                    {(status.value.currentWeight ?? 0).toFixed(1) || 0}g <a class="btn" href="" onClick={() => tareScale()}><i className="fa-solid fa-scale-unbalanced ml-2">Tare</i></a>
                   </dt>
                   <dd className="text-sm font-medium text-slate-500">Weight</dd>
                 </dl>

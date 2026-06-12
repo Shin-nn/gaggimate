@@ -105,12 +105,19 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         broadcastJson(doc);
     });
 
-    // Subscribe to Bluetooth scale weight updates
+    // Subscribe to scale weight updates
     pluginManager->on("controller:scale:measurement",
-                      [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
+                      [this](Event const &event) {
+                          this->currentBluetoothWeight = event.getFloat("value");
+    });
 
-    pluginManager->on("controller:scale:measurement",
-                  [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
+    // Subscribe to scale weight updates
+    pluginManager->on("controller:scale:measurement_detail",
+                      [this](Event const &event) {
+                          this->currentWeight1 = event.getFloat("weight1");
+                          this->currentWeight2 = event.getFloat("weight2");
+                      });
+
 
     setupServer();
 }
@@ -174,10 +181,6 @@ void WebUIPlugin::loop() {
         statusDoc["rssi"] = 0;
         statusDoc["lat"] = -1; // BLE round-trip latency (ms); -1 = not yet measured
 
-        if (HardwareScales.isConnected()) {
-            statusDoc["cw"] = HardwareScales.getWeight();
-        }
-
         statusDoc["hs"] = controller->getSystemInfo().capabilities.hwScale;
 
         if (controller->getClientController()->getClient()->isConnected()) {
@@ -190,7 +193,11 @@ void WebUIPlugin::loop() {
         bool bleConnected = BLEScales.isConnected();
         // Add Bluetooth scale weight information
         statusDoc["bw"] = bleConnected ? this->currentBluetoothWeight : 0; // current bluetooth weight
-        statusDoc["cw"] = bleConnected ? this->currentBluetoothWeight : 0; // Use 'currentWeight' for forward compatbility
+
+        statusDoc["cw1"] = this->currentWeight1;
+        statusDoc["cw2"] = this->currentWeight2;
+
+        statusDoc["cw"] = this->controller->isVolumetricAvailable() ? this->currentBluetoothWeight : 0; // Use 'currentWeight' for forward compatbility
         statusDoc["bc"] = bleConnected;                                    // bluetooth scale connected status
         // Scale battery — only surfaced when the driver reports one and the
         // value isn't the UNKNOWN sentinel (255). UI omits the battery pill
@@ -280,8 +287,8 @@ void WebUIPlugin::setupServer() {
         doc["mode"] = controller->getMode();
         doc["tt"] = controller->getTargetTemp();
         doc["ct"] = controller->getCurrentTemp();
-        if (HardwareScales.isConnected()) {
-            doc["cw"] = HardwareScales.getWeight();
+        if (controller->isVolumetricAvailable()) {
+            doc["cw"] = currentBluetoothWeight;
         }
         serializeJson(doc, *response);
         request->send(response);
@@ -602,7 +609,7 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
 
 void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     if (request->method() == HTTP_POST) {
-        controller->getSettings().batchUpdate([request](Settings *settings) {
+        controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
                 settings->setStartupMode(request->arg("startupMode") == "brew" ? MODE_BREW : MODE_STANDBY);
             if (request->hasArg("startupProfile"))
@@ -752,6 +759,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 if (request->hasArg("scaleFactor2"))
                     scaleFactor2 = request->arg("scaleFactor2").toFloat();
                 settings->setScaleFactors(scaleFactor1, scaleFactor2);
+                controller->getClientController()->sendScaleCalibration(scaleFactor1, scaleFactor2);
             }
 
             settings->save(true);

@@ -30,8 +30,8 @@ class GaggiMateClient {
     using AutotuneResultCallback = std::function<void(float kp, float ki, float kd, float kf)>;
     using VolumetricCallback = std::function<void(float volume)>;
     using TofCallback = std::function<void(uint32_t distance)>;
-    using ScaleCalibrationCallback = std::function<void(const float scaleFactor1, const float scaleFactor2)>;
-    using ScaleMeasurementCallback = std::function<void(const float value)>;
+    using ScaleCalibrationCallback = std::function<void(float scaleFactor1, float scaleFactor2)>;
+    using ScaleMeasurementCallback = std::function<void(float weight, float weight1, float weight2)>;
     using ErrorCallback = std::function<void(int code)>;
 
     GaggiMateClient();

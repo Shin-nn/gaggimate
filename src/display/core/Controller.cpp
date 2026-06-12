@@ -306,13 +306,13 @@ void Controller::setupBluetooth() {
         pluginManager->trigger("controller:tof:change", "value", tofDistance);
     });
 
-    comms.onScaleMeasurementCallback([this](const float value) {
-        ESP_LOGV(LOG_TAG, "Received new scale measurement: %.2f", value);
-        onVolumetricMeasurement(value, VolumetricMeasurementSource::MEASUREMENT);
+    comms.onScaleMeasurementCallback([this](float weight, float weight1, float weight2) {
+        onVolumetricMeasurement(weight, VolumetricMeasurementSource::MEASUREMENT);
+        onScaleMeasurement(weight, weight1, weight2);
     });
 
     comms.onScaleCalibratedCallback([this](const float scaleFactor1, const float scaleFactor2) {
-        ESP_LOGV(LOG_TAG, "Received new scale calibration: %.3f, %.3f", scaleFactor1, scaleFactor2);
+        ESP_LOGI(LOG_TAG, "Received new scale calibration: %.3f, %.3f", scaleFactor1, scaleFactor2);
         settings.setScaleFactors(scaleFactor1, scaleFactor2);
         Event e;
         e.id = "controller:scale:callibration-update";
@@ -1034,6 +1034,15 @@ void Controller::onProfileSaveAsNew() {
     settings.setSelectedProfile(profile.id);
     profileManager->saveProfile(profileManager->getSelectedProfile());
     profileManager->addFavoritedProfile(profile.id);
+}
+
+void Controller::onScaleMeasurement(float w, float w1, float w2) {
+    Event e;
+    e.id="controller:scale:measurement_detail";
+    e.setFloat("weight", w);
+    e.setFloat("weight1", w1);
+    e.setFloat("weight2", w2);
+    pluginManager->trigger(e);
 }
 
 void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source) {

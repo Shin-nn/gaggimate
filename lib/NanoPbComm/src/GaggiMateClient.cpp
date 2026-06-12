@@ -233,6 +233,6 @@ void GaggiMateClient::registerHandlers() {
     });
     _endpoint.on(gaggimate_Payload_scale_measurement_tag, [this](const gm::Payload &p) {
         if (_scaleMeasurementCb)
-            _scaleMeasurementCb(p.content.scale_measurement.volume);
+            _scaleMeasurementCb(p.content.scale_measurement.weight,p.content.scale_measurement.weight1, p.content.scale_measurement.weight2);
     });
 }

@@ -46,8 +46,8 @@ void GaggiMateController::setup() {
     this->steamBtn = new DigitalInput(_config.steamButtonPin, [this](const bool state) { _comms.sendButtonState(1, state); });
 
     this->hardwareScale = new HardwareScale(_config.scaleSdaPin, _config.scaleSda1Pin, _config.scaleSclPin,
-        [this] (const float v) {
-            _comms.sendScaleMeasurement(v);
+        [this] (float w, float w1, float w2) {
+            _comms.sendScaleMeasurement(w, w1, w2);
         },
         [this](float scaleFactor1, float scaleFactor2) {
             _comms.sendScaleCalibrated(scaleFactor1, scaleFactor2);
@@ -58,10 +58,6 @@ void GaggiMateController::setup() {
     if (this->hardwareScale->isAvailable()) {
         ESP_LOGI(LOG_TAG, "HW SCALE AVAILABLE");
         _config.capabilites.hwScale = true;
-
-        _comms.onTare([this]() {
-            this->hardwareScale->tare();
-        });
 
         _comms.onCalibrateScale([this](uint8_t cell, float calibration_weight) {
             this->hardwareScale->calibrateScale(cell, calibration_weight);
@@ -243,6 +239,10 @@ void GaggiMateController::setup() {
     });
 
     _comms.onTare([this]() {
+        if (this->hardwareScale->isAvailable()) {
+            this->hardwareScale->tare();
+        }
+
         if (!_config.capabilites.dimming) {
             return;
         }
@@ -275,6 +275,8 @@ void GaggiMateController::registerBoardConfig(ControllerConfig config) { configs
 void GaggiMateController::detectBoard() {
     constexpr int MAX_DETECT_RETRIES = 3;
     pinMode(DETECT_EN_PIN, OUTPUT);
+    pinMode(17, OUTPUT);
+    digitalWrite(17, LOW);
     pinMode(DETECT_VALUE_PIN, INPUT_PULLDOWN);
 
     for (int attempt = 0; attempt < MAX_DETECT_RETRIES; attempt++) {

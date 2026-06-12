@@ -15,17 +15,12 @@ class HardwareScalePlugin : public Plugin {
     void calibrate(uint8_t cell, float calibrationWeight);
 
     bool isConnected() const {  return _isAvailable; }
-    float getWeight() const {
-        return _lastMeasurement;
-    }
-
   private:
     void onMeasurement(float value);
     void onProcessStart();
 
     const char *LOG_TAG = "HardwareScalePlugin";
     bool _isAvailable;
-    float _lastMeasurement = 0.0f;
     float _scaleFactor1 = 1.0f, _scaleFactor2 = 1.0f;
 
     Controller *controller = nullptr;

@@ -89,6 +89,7 @@ class Controller {
     void onProfileSave() const;
     void onProfileSaveAsNew();
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
+    void onScaleMeasurement(float w, float w1, float w2);
     void setHardwareScaleAvailable(bool override) { hardwareScaleAvailable = override; }
     void onFlush();
     int getWaterLevel() const {

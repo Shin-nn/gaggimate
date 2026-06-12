@@ -87,6 +87,8 @@ class WebUIPlugin : public Plugin {
     bool serverRunning = false;
     String updateComponent = "";
     float currentBluetoothWeight = 0.0f;
+    float currentWeight1 = 0.0f;
+    float currentWeight2 = 0.0f;
     // Reused for every 500ms status broadcast. Allocating a fresh JsonDocument
     // each tick was a major contributor to internal-heap fragmentation
     // (device reports 33%+ fragmentation, causing AsyncTCP buffer allocs to
