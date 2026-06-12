@@ -86,6 +86,10 @@ void onMenuClick(lv_event_t *e) {
     controller.getUI()->changeScreen(&ui_MenuScreen, &ui_MenuScreen_screen_init);
 }
 
+void onWeightClick(lv_event_t *e) {
+    controller.getClientController()->tare();
+}
+
 void onGrindScreen(lv_event_t *e) {
     controller.getUI()->changeScreen(&ui_GrindScreen, &ui_GrindScreen_screen_init);
     controller.setMode(MODE_GRIND);
@@ -125,6 +129,8 @@ void onMenuScreenLoad(lv_event_t *e) {
 }
 
 void onBrewScreenLoad(lv_event_t *e) {
+    lv_obj_set_ext_click_area(ui_BrewScreen_volumetricButton, 15);
+    lv_obj_set_ext_click_area(ui_BrewScreen_weightLabel, 15);
     lv_obj_set_ext_click_area(ui_BrewScreen_startButton, 25);
     lv_obj_set_ext_click_area(ui_BrewScreen_profileSelectBtn, 25);
     lv_obj_set_ext_click_area(ui_BrewScreen_ImgButton5, 20);

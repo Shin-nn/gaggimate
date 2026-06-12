@@ -57,6 +57,7 @@ extern lv_obj_t *ui_BrewScreen_saveButton;
 extern void ui_event_BrewScreen_acceptButton(lv_event_t *e);
 extern lv_obj_t *ui_BrewScreen_acceptButton;
 extern void ui_event_BrewScreen_saveAsNewButton(lv_event_t *e);
+extern void ui_event_BrewScreen_weightBtn(lv_event_t *e);
 extern lv_obj_t *ui_BrewScreen_saveAsNewButton;
 // CUSTOM VARIABLES
 extern lv_obj_t *uic_BrewScreen_dials_tempGauge;

@@ -529,6 +529,10 @@ void ui_BrewScreen_screen_init(void) {
     ui_object_set_themeable_style_property(ui_BrewScreen_saveAsNewButton, LV_PART_MAIN | LV_STATE_DEFAULT,
                                            LV_STYLE_IMG_RECOLOR_OPA, _ui_theme_alpha_NiceWhite);
 
+
+    lv_obj_add_event_cb(ui_BrewScreen_volumetricButton, ui_event_BrewScreen_weightBtn, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_BrewScreen_weightLabel, ui_event_BrewScreen_weightBtn, LV_EVENT_ALL, NULL);
+
     lv_obj_add_event_cb(ui_BrewScreen_ImgButton5, ui_event_BrewScreen_ImgButton5, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_BrewScreen_startButton, ui_event_BrewScreen_startButton, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_BrewScreen_modeSwitch, ui_event_BrewScreen_modeSwitch, LV_EVENT_ALL, NULL);
@@ -549,6 +553,14 @@ void ui_BrewScreen_screen_init(void) {
     uic_BrewScreen_dials_pressureTarget = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_PRESSURETARGET);
     uic_BrewScreen_dials_pressureText = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_PRESSURETEXT);
     uic_BrewScreen_dials_tempText = ui_comp_get_child(ui_BrewScreen_dials, UI_COMP_DIALS_TEMPTEXT);
+}
+
+void ui_event_BrewScreen_weightBtn(lv_event_t *e) {
+    lv_event_code_t event_code = lv_event_get_code(e);
+
+    if (event_code == LV_EVENT_CLICKED) {
+        onWeightClick(e);
+    }
 }
 
 void ui_BrewScreen_screen_destroy(void) {
