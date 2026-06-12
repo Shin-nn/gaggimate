@@ -81,6 +81,7 @@ const ControllerConfig GM_STANDARD_REV_1X = {.name = "GaggiMate Standard Rev 1.x
                                                  .ssrPump = false,
                                                  .ledControls = false,
                                                  .tof = false,
+                                                 .hwScale =  false
                                              }};
 
 const ControllerConfig GM_STANDARD_REV_2X = {.name = "GaggiMate Standard Rev 2.x",
@@ -113,6 +114,7 @@ const ControllerConfig GM_STANDARD_REV_2X = {.name = "GaggiMate Standard Rev 2.x
                                                  .ssrPump = true,
                                                  .ledControls = false,
                                                  .tof = false,
+                                                 .hwScale =  false
                                              }};
 
 const ControllerConfig GM_PRO_REV_1x = {.name = "GaggiMate Pro Rev 1.0",
@@ -148,6 +150,7 @@ const ControllerConfig GM_PRO_REV_1x = {.name = "GaggiMate Pro Rev 1.0",
                                             .ssrPump = false,
                                             .ledControls = false,
                                             .tof = false,
+                                            .hwScale =  false
                                         }};
 
 const ControllerConfig GM_PRO_LEGO = {.name = "GaggiMate Pro Lego Build",
@@ -183,6 +186,7 @@ const ControllerConfig GM_PRO_LEGO = {.name = "GaggiMate Pro Lego Build",
                                           .ssrPump = false,
                                           .ledControls = false,
                                           .tof = false,
+                                          .hwScale =  false
                                       }};
 
 const ControllerConfig GM_PRO_REV_11 = {.name = "GaggiMate Pro Rev 1.1",
@@ -218,6 +222,7 @@ const ControllerConfig GM_PRO_REV_11 = {.name = "GaggiMate Pro Rev 1.1",
                                             .ssrPump = false,
                                             .ledControls = false,
                                             .tof = false,
+                                            .hwScale =  false
                                         }};
 
 const ControllerConfig GM_STANDARD_REV_3X = {.name = "GaggiMate Standard Rev 3.x",
@@ -250,6 +255,7 @@ const ControllerConfig GM_STANDARD_REV_3X = {.name = "GaggiMate Standard Rev 3.x
                                                  .ssrPump = true,
                                                  .ledControls = false,
                                                  .tof = false,
+                                                 .hwScale =  false
                                              }};
 
 #endif // CONTROLLERCONFIG_H

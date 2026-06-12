@@ -86,11 +86,12 @@ export function Home() {
           title='Temperature & Pressure Chart'
           fullHeight={true}
         >
+            {console.log(hwScale.value)}
           {hwScale.value && (
               <div className="p-6 sm:col-span-12 md:col-span-4">
                 <dl>
                   <dt className="text-xl md:text-2xl font-bold">
-                    {status.value.currentWeight?.toFixed(1) || 0}g <a class="btn" href="" onClick={() => tareScale()}><i className="fa-solid fa-scale-unbalanced ml-2"></i></a>
+                    {hwScale.value.currentWeight?.toFixed(1) || 0}g <a class="btn" href="" onClick={() => tareScale()}><i className="fa-solid fa-scale-unbalanced ml-2"></i></a>
                   </dt>
                   <dd className="text-sm font-medium text-slate-500">Weight</dd>
                 </dl>

@@ -409,6 +409,7 @@ export function PluginCard({
                         id='scaleFactor1'
                         name='scaleFactor1'
                         type='number'
+                        step="0.001"
                         className='input input-bordered w-full'
                         placeholder='0'
                         value={formData.scaleFactor1}
@@ -424,6 +425,7 @@ export function PluginCard({
                         id='scaleFactor2'
                         name='scaleFactor2'
                         type='number'
+                        tep="0.001"
                         className='input input-bordered w-full'
                         placeholder='0'
                         value={formData.scaleFactor2}

@@ -96,6 +96,7 @@ void GaggiMateController::setup() {
     capabilities.tof = _config.capabilites.tof;
     capabilities.led_control = _config.capabilites.ledControls;
     capabilities.hardware_scale = _config.capabilites.hwScale;
+
     if (this->gearpumpAddon != nullptr) {
         capabilities.addons_count = 1;
         capabilities.addons[0] = gaggimate_Addon_init_zero;
@@ -396,6 +397,9 @@ void GaggiMateController::handleSerialCommand(char c) {
             ESP_LOGI("Controller", "║  ├─ Pressure: %.2f", pressureSensor->getPressure());
             ESP_LOGI("Controller", "║  ├─ Flow: %.2f", dimmedPump->getPumpFlow());
             ESP_LOGI("Controller", "║  ├─ Pump Power: %.2f", dimmedPump->getPowerTarget());
+        }
+        if (_config.capabilites.hwScale) {
+            ESP_LOGI("Controller", "║  ├─ HardwareScale enabled");
         }
         ESP_LOGI("Controller", "║  └─ Temperature: %.2f", thermocouple->read());
         ESP_LOGI("Controller", "║");

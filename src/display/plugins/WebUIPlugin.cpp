@@ -106,8 +106,11 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     });
 
     // Subscribe to Bluetooth scale weight updates
-    pluginManager->on("controller:volumetric-measurement:bluetooth:change",
+    pluginManager->on("controller:scale:measurement",
                       [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
+
+    pluginManager->on("controller:scale:measurement",
+                  [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
 
     setupServer();
 }

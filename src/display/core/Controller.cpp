@@ -309,7 +309,6 @@ void Controller::setupBluetooth() {
     comms.onScaleMeasurementCallback([this](const float value) {
         ESP_LOGV(LOG_TAG, "Received new scale measurement: %.2f", value);
         onVolumetricMeasurement(value, VolumetricMeasurementSource::MEASUREMENT);
-        // pluginManager->trigger("controller:scale:measurement", "value", value);
     });
 
     comms.onScaleCalibratedCallback([this](const float scaleFactor1, const float scaleFactor2) {
@@ -341,7 +340,7 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
                                 },
                             .protocolVersion = protocolVersion,
                             .protocolMismatch = mismatch};
-    ESP_LOGI(LOG_TAG, "System info: %s %s (proto=%u local=%u dm=%d ps=%d led=%d tof=%d tof=%d)", hardware, version, protocolVersion,
+    ESP_LOGI(LOG_TAG, "System info: %s %s (proto=%u local=%u dm=%d ps=%d led=%d tof=%d tof=%d hwscale=%d)", hardware, version, protocolVersion,
              gm_proto::PROTOCOL_VERSION, dimming, pressure, ledControl, tof, hwScale);
     if (mismatch) {
         // Mixed-firmware links are not wire-compatible, so don't push config and
@@ -624,8 +623,8 @@ bool Controller::isVolumetricAvailable() const {
     }
 #endif
 
-    unsigned long timeSinceLastBluetooth = millis() - lastBluetoothMeasurement;
-    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || hardwareScaleAvailable;
+    unsigned long timeSinceLastMeasurement = millis() - lastWeightMeasurement;
+    return (timeSinceLastMeasurement < WEIGHT_GRACE_PERIOD_MS) || hardwareScaleAvailable;
 
 }
 
@@ -1040,10 +1039,10 @@ void Controller::onProfileSaveAsNew() {
 void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source) {
     pluginManager->trigger(source == VolumetricMeasurementSource::FLOW_ESTIMATION
                                ? F("controller:volumetric-measurement:estimation:change")
-                               : F("controller:volumetric-measurement:bluetooth:change"),
+                               : F("controller:scale:measurement"),
                            "value", static_cast<float>(measurement));
     if (source == VolumetricMeasurementSource::MEASUREMENT) {
-        lastBluetoothMeasurement = millis();
+        lastWeightMeasurement = millis();
     }
 
     if (currentVolumetricSource != source) {
