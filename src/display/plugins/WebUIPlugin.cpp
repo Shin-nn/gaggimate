@@ -124,6 +124,9 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
 
 String WebUIPlugin::createOtaURL(){
     auto releaseURL = controller->getSettings().getCustomOTAURL().isEmpty() ? RELEASE_URL : controller->getSettings().getCustomOTAURL();
+    if (!releaseURL.endsWith("/")) {
+        releaseURL += "/";
+    }
     return releaseURL + (controller->getSettings().getOTAChannel() == "latest" ? "latest" : "tag/nightly");
 }
 
@@ -607,7 +610,7 @@ void WebUIPlugin::handleProfileRequest(uint32_t clientId, JsonDocument &request)
     ws.text(clientId, buffer);
 }
 
-void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
+void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     if (request->method() == HTTP_POST) {
         controller->getSettings().batchUpdate([this, request](Settings *settings) {
             if (request->hasArg("startupMode"))
@@ -703,8 +706,21 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setIntegralGain(request->arg("integralGain").toFloat());
             if (request->hasArg("maxPumpPower"))
                 settings->setMaxPumpPower(request->arg("maxPumpPower").toFloat());
-            if (request->hasArg("customOTAURL"))
+            if (request->hasArg("customOTAURL")) {
                 settings->setCustomOTAUrl(request->arg("customOTAURL"));
+                ota->setReleaseUrl(request->arg("customOTAURL"));
+                lastUpdateCheck = 0;
+            }
+            if (request->hasArg("buttonBehavior"))
+                settings->setButtonBehaviorList(explode(request->arg("buttonBehavior"), ','));
+            if (request->hasArg("commutationGain"))
+                settings->setCommutationGain(request->arg("commutationGain").toFloat());
+            if (request->hasArg("convergenceGain"))
+                settings->setConvergenceGain(request->arg("convergenceGain").toFloat());
+            if (request->hasArg("integralGain"))
+                settings->setIntegralGain(request->arg("integralGain").toFloat());
+            if (request->hasArg("maxPumpPower"))
+                settings->setMaxPumpPower(request->arg("maxPumpPower").toFloat());
             settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled"));
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
@@ -930,7 +946,6 @@ void WebUIPlugin::updateOTAStatus(const String &version) {
     doc["hardware"] = controller->getSystemInfo().hardware;
     doc["latestVersion"] = ota->getCurrentVersion();
     doc["channel"] = settings.getOTAChannel();
-    doc["customChannel"] = settings.getOTAChannel();
     doc["updating"] = updating;
     // LittleFS usage metrics
     {
