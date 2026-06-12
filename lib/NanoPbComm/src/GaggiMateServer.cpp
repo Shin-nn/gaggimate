@@ -202,13 +202,11 @@ void GaggiMateServer::registerHandlers() {
                    static_cast<uint8_t>(p.content.led.channels[i].brightness));
     });
     _endpoint.on(gaggimate_Payload_set_scale_calibration_tag, [this](const gm::Payload &p) {
-        ESP_LOGI("TOM", "HW SET SCALE");
         if (!_scaleCalibrationCb)
             return;
         _scaleCalibrationCb(p.content.set_scale_calibration.scale_factor1, p.content.set_scale_calibration.scale_factor2);
     });
     _endpoint.on(gaggimate_Payload_calibrate_scale_tag, [this](const gm::Payload &p) {
-        ESP_LOGI("TOM", "HW CALIBRATE SCALE");
         if (!_calibrateScaleCb)
             return;
         _calibrateScaleCb(p.content.calibrate_scale.cell, p.content.calibrate_scale.calibration_weight);

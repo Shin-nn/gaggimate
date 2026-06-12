@@ -85,7 +85,7 @@ void Controller::setup() {
     pluginManager->registerPlugin(new NetworkWatchdogPlugin());
     pluginManager->registerPlugin(new WifiStaWatchdogPlugin());
     pluginManager->registerPlugin(&ShotHistory);
-    // pluginManager->registerPlugin(&BLEScales);
+    pluginManager->registerPlugin(&BLEScales);
     pluginManager->registerPlugin(&HardwareScales);
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
