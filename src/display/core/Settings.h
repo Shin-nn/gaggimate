@@ -82,6 +82,7 @@ class Settings {
     int getSmartGrindMode() const { return smartGrindMode; }
     String getSmartGrindIp() const { return smartGrindIp; }
     bool isHomeAssistant() const { return homeAssistant; }
+    bool isHardwareScale() const { return hardwareScale; }
     String getHomeAssistantIP() const { return homeAssistantIP; }
     String getHomeAssistantUser() const { return homeAssistantUser; }
     String getHomeAssistantPassword() const { return homeAssistantPassword; }
@@ -135,6 +136,9 @@ class Settings {
         return "";
     };
     std::vector<String> getButtonBehaviorList() const { return buttonBehavior; }
+    float getScaleFactor1() const { return scaleFactor1; }
+    float getScaleFactor2() const { return scaleFactor2; }
+    void setTargetBrewTemp(int target_brew_temp);
     float getCommutationGain() const { return commutationGain; }
     float getConvergenceGain() const { return convergenceGain; }
     float getIntegralGain() const { return integralGain; }
@@ -205,6 +209,8 @@ class Settings {
     void setSunriseExtBrightness(int sunrise_ext_brightness);
     void setEmptyTankDistance(int empty_tank_distance);
     void setFullTankDistance(int full_tank_distance);
+    void setHardwareScale(bool enabled);
+    void setScaleFactors(float scale_factor_1, float scale_factor_2);
     void setAltRelayFunction(int alt_relay_function);
     void setAutoWakeupEnabled(bool enabled);
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
@@ -266,6 +272,8 @@ class Settings {
     float steamPumpCutoff = DEFAULT_STEAM_PUMP_CUTOFF;
     int historyIndex = 0;
 
+    bool hardwareScale = false;
+
     // Display settings
     int mainBrightness = 16;
     int standbyBrightness = 8;
@@ -295,6 +303,10 @@ class Settings {
     float convergenceGain = DEFAULT_CONVERGENCE_GAIN;
     float integralGain = DEFAULT_INTEGRAL_GAIN;
     float maxPumpPower = 1.0f;
+
+    // Hardware scale settings
+    float scaleFactor1 = 0.0f;
+    float scaleFactor2 = 0.0f;
 
     void doSave();
     xTaskHandle taskHandle;

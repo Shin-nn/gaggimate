@@ -144,9 +144,6 @@ void BLEScalePlugin::update() {
         hasConnectedScale = scale->isConnected();
     }
 
-    if (controller->isVolumetricAvailable())
-        controller->setVolumetricOverride(hasConnectedScale);
-
     if (!active)
         return;
 
@@ -357,7 +354,7 @@ void BLEScalePlugin::onMeasurement(float value) const {
     }
 
     // Safe to call controller method
-    controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::BLUETOOTH);
+    controller->onVolumetricMeasurement(value, VolumetricMeasurementSource::MEASUREMENT);
 
     // If the scale driver also provides native flow rate (e.g. Bookoo), emit
     // it on the same tick so consumers get it at the scale's native cadence

@@ -95,6 +95,23 @@ gm::Payload GaggiMateServer::buildVolumetricMeasurement(float volume) {
     return p;
 }
 
+gm::Payload GaggiMateServer::buildScaleMeasurement(float weight, float weight1, float weight2){
+    gm::Payload p = gaggimate_Payload_init_zero;
+    p.which_content = gaggimate_Payload_scale_measurement_tag;
+    p.content.scale_measurement.weight = weight;
+    p.content.scale_measurement.weight1 = weight1;
+    p.content.scale_measurement.weight2 = weight2;
+    return p;
+}
+
+gm::Payload GaggiMateServer::buildScaleCalibrated(float scaleFactor1, float scaleFactor2){
+    gm::Payload p = gaggimate_Payload_init_zero;
+    p.which_content = gaggimate_Payload_scale_calibrated_tag;
+    p.content.scale_calibrated.scale_factor1 = scaleFactor1;
+    p.content.scale_calibrated.scale_factor2 = scaleFactor2;
+    return p;
+}
+
 gm::Payload GaggiMateServer::buildTofMeasurement(uint32_t distance) {
     gm::Payload p = gaggimate_Payload_init_zero;
     p.which_content = gaggimate_Payload_tof_tag;
@@ -124,6 +141,14 @@ void GaggiMateServer::sendAutotuneResult(float kp, float ki, float kd, float kf)
 }
 
 void GaggiMateServer::sendVolumetricMeasurement(float volume) { _endpoint.sendUnreliable(buildVolumetricMeasurement(volume)); }
+
+void GaggiMateServer::sendScaleMeasurement(float weight, float weight1, float weight2) {
+    _endpoint.sendUnreliable(buildScaleMeasurement(weight, weight1, weight2));
+}
+
+void GaggiMateServer::sendScaleCalibrated(float scaleFactor1, float scaleFactor2){
+    _endpoint.sendUnreliable(buildScaleCalibrated(scaleFactor1, scaleFactor2));
+}
 
 void GaggiMateServer::sendTofMeasurement(uint32_t distance) { _endpoint.sendUnreliable(buildTofMeasurement(distance)); }
 
@@ -175,5 +200,15 @@ void GaggiMateServer::registerHandlers() {
         for (pb_size_t i = 0; i < p.content.led.channels_count; i++)
             _ledCb(static_cast<uint8_t>(p.content.led.channels[i].channel),
                    static_cast<uint8_t>(p.content.led.channels[i].brightness));
+    });
+    _endpoint.on(gaggimate_Payload_set_scale_calibration_tag, [this](const gm::Payload &p) {
+        if (!_scaleCalibrationCb)
+            return;
+        _scaleCalibrationCb(p.content.set_scale_calibration.scale_factor1, p.content.set_scale_calibration.scale_factor2);
+    });
+    _endpoint.on(gaggimate_Payload_calibrate_scale_tag, [this](const gm::Payload &p) {
+        if (!_calibrateScaleCb)
+            return;
+        _calibrateScaleCb(p.content.calibrate_scale.cell, p.content.calibrate_scale.calibration_weight);
     });
 }

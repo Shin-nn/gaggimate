@@ -27,6 +27,7 @@
 #include <display/plugins/NetworkWatchdogPlugin.h>
 #include <display/plugins/WifiStaWatchdogPlugin.h>
 #include <display/plugins/mDNSPlugin.h>
+#include <display/plugins/HardwareScalePlugin.h>
 #endif
 #include <display/util/PsramAllocator.h>
 #ifndef GAGGIMATE_HEADLESS
@@ -98,6 +99,7 @@ void Controller::setup() {
     pluginManager->registerPlugin(&ShotHistory);
 #ifndef GAGGIMATE_SIM
     pluginManager->registerPlugin(&BLEScales);
+    pluginManager->registerPlugin(&HardwareScales);
 #endif
     pluginManager->registerPlugin(new LedControlPlugin());
     pluginManager->registerPlugin(new AutoWakeupPlugin());
@@ -199,10 +201,9 @@ void Controller::setupBluetooth() {
             setMode(MODE_STANDBY);
         }
     });
-    comms.onSystemInfo([this](const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
-                              bool ledControl, bool tof, vector<uint32_t> addons) {
-        onSystemInfo(hardware, version, protocolVersion, dimming, pressure, ledControl, tof, addons);
-    });
+    comms.onSystemInfo(
+        [this](const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure, bool ledControl,
+               bool tof, vector<uint32_t> addons, bool hwScale) { onSystemInfo(hardware, version, protocolVersion, dimming, pressure, ledControl, tof, addons, hwScale); });
     comms.onIncompatibleController([this](const String &info) { onIncompatibleController(info); });
     // A controller OTA streams the firmware over this BLE link; the relaxed idle
     // interval makes that crawl. Force a low-latency interval for the duration of
@@ -312,18 +313,36 @@ void Controller::setupBluetooth() {
         pluginManager->trigger("controller:autotune:result");
         autotuning = false;
     });
+
     comms.onVolumetricMeasurement(
         [this](float value) { onVolumetricMeasurement(value, VolumetricMeasurementSource::FLOW_ESTIMATION); });
+
     comms.onTofMeasurement([this](uint32_t value) {
         tofDistance = static_cast<int>(value);
         ESP_LOGV(LOG_TAG, "Received new TOF distance: %d", tofDistance);
         pluginManager->trigger("controller:tof:change", "value", tofDistance);
     });
+
+    comms.onScaleMeasurementCallback([this](float weight, float weight1, float weight2) {
+        onVolumetricMeasurement(weight, VolumetricMeasurementSource::MEASUREMENT);
+        onScaleMeasurement(weight, weight1, weight2);
+    });
+
+    comms.onScaleCalibratedCallback([this](const float scaleFactor1, const float scaleFactor2) {
+        ESP_LOGI(LOG_TAG, "Received new scale calibration: %.3f, %.3f", scaleFactor1, scaleFactor2);
+        settings.setScaleFactors(scaleFactor1, scaleFactor2);
+        Event e;
+        e.id = "controller:scale:callibration-update";
+        e.setFloat("scaleFactor1", scaleFactor1);
+        e.setFloat("scaleFactor2", scaleFactor2);
+        pluginManager->trigger(e);
+    });
+
     pluginManager->trigger("controller:bluetooth:init");
 }
 
 void Controller::onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
-                              bool ledControl, bool tof, vector<uint32_t> addons) {
+                              bool ledControl, bool tof, vector<uint32_t> addons, bool hwScale) {
     const bool mismatch = protocolVersion != gm_proto::PROTOCOL_VERSION;
     systemInfo = SystemInfo{.hardware = String(hardware),
                             .version = String(version),
@@ -334,11 +353,12 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
                                     .ledControl = ledControl,
                                     .tof = tof,
                                     .addons = addons,
+                                    .hwScale =  hwScale
                                 },
                             .protocolVersion = protocolVersion,
                             .protocolMismatch = mismatch};
-    ESP_LOGI(LOG_TAG, "System info: %s %s (proto=%u local=%u dm=%d ps=%d led=%d tof=%d)", hardware, version, protocolVersion,
-             gm_proto::PROTOCOL_VERSION, dimming, pressure, ledControl, tof);
+    ESP_LOGI(LOG_TAG, "System info: %s %s (proto=%u local=%u dm=%d ps=%d led=%d tof=%d tof=%d hwscale=%d)", hardware, version, protocolVersion,
+             gm_proto::PROTOCOL_VERSION, dimming, pressure, ledControl, tof, hwScale);
     if (mismatch) {
         // Mixed-firmware links are not wire-compatible, so don't push config and
         // don't drive control (updateControl() also bails on protocolMismatch).
@@ -379,7 +399,7 @@ void Controller::onIncompatibleController(const String &infoJson) {
     DeserializationError err = deserializeJson(doc, infoJson);
     if (err) {
         ESP_LOGW(LOG_TAG, "Incompatible controller, no readable info (%s)", err.c_str());
-        onSystemInfo("Legacy controller", "0.0.0", 0, false, false, false, false, {});
+        onSystemInfo("Legacy controller", "0.0.0", 0, false, false, false, false, {}, false);
         return;
     }
     String hardware = doc["hw"].as<String>();
@@ -388,8 +408,13 @@ void Controller::onIncompatibleController(const String &infoJson) {
         hardware = "Legacy controller";
     if (version.isEmpty())
         version = "0.0.0";
-    onSystemInfo(hardware.c_str(), version.c_str(), 0, doc["cp"]["dm"].as<bool>(), doc["cp"]["ps"].as<bool>(),
-                 doc["cp"]["led"].as<bool>(), doc["cp"]["tof"].as<bool>(), {});
+    onSystemInfo(hardware.c_str(), version.c_str(), 0,
+                 doc["cp"]["dm"].as<bool>(),
+                 doc["cp"]["ps"].as<bool>(),
+                 doc["cp"]["led"].as<bool>(),
+                 doc["cp"]["tof"].as<bool>(),
+                 {},
+                 doc["cp"]["hs"].as<bool>());
 }
 
 void Controller::setupWifi() {
@@ -615,10 +640,14 @@ bool Controller::isReady() const { return !isUpdating() && !isErrorState() && !i
 
 bool Controller::isVolumetricAvailable() const {
 #ifdef NIGHTLY_BUILD
-    return isBluetoothScaleHealthy() || systemInfo.capabilities.dimming;
-#else
-    return isBluetoothScaleHealthy();
+    if (systemInfo.capabilities.dimming) {
+        return systemInfo.capabilities.dimming;
+    }
 #endif
+
+    unsigned long timeSinceLastMeasurement = millis() - lastWeightMeasurement;
+    return (timeSinceLastMeasurement < WEIGHT_GRACE_PERIOD_MS) || hardwareScaleAvailable;
+
 }
 
 void Controller::updatePIDValues(String newValue){
@@ -911,11 +940,11 @@ void Controller::activate() {
     clear();
     comms.tare();
     if (isVolumetricAvailable()) {
+       currentVolumetricSource = VolumetricMeasurementSource::MEASUREMENT;
 #ifdef NIGHTLY_BUILD
-        currentVolumetricSource =
-            isBluetoothScaleHealthy() ? VolumetricMeasurementSource::BLUETOOTH : VolumetricMeasurementSource::FLOW_ESTIMATION;
-#else
-        currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+        if (!systemInfo.capabilities.dimming) {
+            currentVolumetricSource = VolumetricMeasurementSource::FLOW_ESTIMATION;
+        }
 #endif
         if (mode == MODE_BREW) {
             pluginManager->trigger("controller:brew:prestart");
@@ -976,7 +1005,7 @@ void Controller::activateGrind() {
         return;
     clear();
     if (settings.isVolumetricTarget() && isVolumetricAvailable()) {
-        currentVolumetricSource = VolumetricMeasurementSource::BLUETOOTH;
+        currentVolumetricSource = VolumetricMeasurementSource::MEASUREMENT;
         startProcess(new GrindProcess(ProcessTarget::VOLUMETRIC, 0, settings.getTargetGrindVolume(), settings.getGrindDelay()));
     } else {
         startProcess(
@@ -1044,13 +1073,22 @@ void Controller::onProfileSaveAsNew() {
     profileManager->addFavoritedProfile(profile.id);
 }
 
+void Controller::onScaleMeasurement(float w, float w1, float w2) {
+    Event e;
+    e.id="controller:scale:measurement_detail";
+    e.setFloat("weight", w);
+    e.setFloat("weight1", w1);
+    e.setFloat("weight2", w2);
+    pluginManager->trigger(e);
+}
+
 void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source) {
     pluginManager->trigger(source == VolumetricMeasurementSource::FLOW_ESTIMATION
                                ? F("controller:volumetric-measurement:estimation:change")
-                               : F("controller:volumetric-measurement:bluetooth:change"),
+                               : F("controller:scale:measurement"),
                            "value", static_cast<float>(measurement));
-    if (source == VolumetricMeasurementSource::BLUETOOTH) {
-        lastBluetoothMeasurement = millis();
+    if (source == VolumetricMeasurementSource::MEASUREMENT) {
+        lastWeightMeasurement = millis();
     }
 
     if (currentVolumetricSource != source) {
@@ -1071,11 +1109,6 @@ void Controller::onVolumetricMeasurement(double measurement, VolumetricMeasureme
     if (last != nullptr && !last->isComplete()) {
         last->updateVolume(measurement);
     }
-}
-
-bool Controller::isBluetoothScaleHealthy() const {
-    unsigned long timeSinceLastBluetooth = millis() - lastBluetoothMeasurement;
-    return (timeSinceLastBluetooth < BLUETOOTH_GRACE_PERIOD_MS) || volumetricOverride;
 }
 
 void Controller::onFlush() {

@@ -45,6 +45,32 @@ void GaggiMateController::setup() {
     this->brewBtn = new DigitalInput(_config.brewButtonPin, [this](const bool state) { _comms.sendButtonState(0, state); });
     this->steamBtn = new DigitalInput(_config.steamButtonPin, [this](const bool state) { _comms.sendButtonState(1, state); });
 
+    this->hardwareScale = new HardwareScale(_config.scaleSdaPin, _config.scaleSda1Pin, _config.scaleSclPin,
+        [this] (float w, float w1, float w2) {
+            _comms.sendScaleMeasurement(w, w1, w2);
+        },
+        [this](float scaleFactor1, float scaleFactor2) {
+            _comms.sendScaleCalibrated(scaleFactor1, scaleFactor2);
+        });
+
+    this->hardwareScale->setup();
+
+    if (this->hardwareScale->isAvailable()) {
+        ESP_LOGI(LOG_TAG, "HW SCALE AVAILABLE");
+        _config.capabilites.hwScale = true;
+
+        _comms.onCalibrateScale([this](uint8_t cell, float calibration_weight) {
+            this->hardwareScale->calibrateScale(cell, calibration_weight);
+        });
+
+        _comms.onSetScaleCalibration([this](float scaleFactor1, float scaleFactor2) {
+            ESP_LOGI(LOG_TAG, "set calibration");
+            this->hardwareScale->setScaleFactors(scaleFactor1, scaleFactor2);
+        });
+    } else {
+        ESP_LOGI(LOG_TAG, "HW SCALE disabled");
+    }
+
     // 4-Pin peripheral port
     albaComms = new SoftWire(_config.sunriseSdaPin, _config.sunriseSclPin);
     albaComms->setTxBuffer(albaSwTxBuffer, sizeof(albaSwTxBuffer));
@@ -65,6 +91,8 @@ void GaggiMateController::setup() {
     capabilities.pressure = _config.capabilites.pressure;
     capabilities.tof = _config.capabilites.tof;
     capabilities.led_control = _config.capabilites.ledControls;
+    capabilities.hardware_scale = _config.capabilites.hwScale;
+
     if (this->gearpumpAddon != nullptr) {
         capabilities.addons_count = 1;
         capabilities.addons[0] = gaggimate_Addon_init_zero;
@@ -182,6 +210,7 @@ void GaggiMateController::setup() {
         // Apply thermal feedforward parameters if available
         this->heater->setFeedforwardScale(Kf);
     });
+
     _comms.onPumpSettings([this](gm::PumpSettings settings) {
         if (_config.capabilites.dimming) {
             auto dimmedPump = static_cast<DimmedPump *>(pump);
@@ -208,7 +237,12 @@ void GaggiMateController::setup() {
         }
         this->heater->autotune(static_cast<int>(testTimeSec), static_cast<int>(windowSize), static_cast<int>(heaterWattage));
     });
+
     _comms.onTare([this]() {
+        if (this->hardwareScale->isAvailable()) {
+            this->hardwareScale->tare();
+        }
+
         if (!_config.capabilites.dimming) {
             return;
         }
@@ -241,6 +275,8 @@ void GaggiMateController::registerBoardConfig(ControllerConfig config) { configs
 void GaggiMateController::detectBoard() {
     constexpr int MAX_DETECT_RETRIES = 3;
     pinMode(DETECT_EN_PIN, OUTPUT);
+    pinMode(17, OUTPUT);
+    digitalWrite(17, LOW);
     pinMode(DETECT_VALUE_PIN, INPUT_PULLDOWN);
 
     for (int attempt = 0; attempt < MAX_DETECT_RETRIES; attempt++) {
@@ -363,6 +399,9 @@ void GaggiMateController::handleSerialCommand(char c) {
             ESP_LOGI("Controller", "║  ├─ Pressure: %.2f", pressureSensor->getPressure());
             ESP_LOGI("Controller", "║  ├─ Flow: %.2f", dimmedPump->getPumpFlow());
             ESP_LOGI("Controller", "║  ├─ Pump Power: %.2f", dimmedPump->getPowerTarget());
+        }
+        if (_config.capabilites.hwScale) {
+            ESP_LOGI("Controller", "║  ├─ HardwareScale enabled");
         }
         ESP_LOGI("Controller", "║  └─ Temperature: %.2f", thermocouple->read());
         ESP_LOGI("Controller", "║");

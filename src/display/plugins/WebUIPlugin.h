@@ -6,6 +6,8 @@
 #include <DNSServer.h>
 
 #include "GitHubOTA.h"
+#include "display/core/Event.h"
+
 #include <ArduinoJson.h>
 #include <ESPAsyncWebServer.h>
 #include <display/core/Plugin.h>
@@ -56,6 +58,9 @@ class WebUIPlugin : public Plugin {
     void sendAutotuneResult();
     void sendAutotuneFailed();
 
+    void sendScaleCalibrationFailed(const String & reason);
+    void sendScaleCalibrationResult(float scaleFactor1, float scaleFactor2);
+
     // Broadcast a JsonDocument to all WebSocket clients with a single internal
     // allocation. `doc.as<String>()` builds an Arduino String on the internal
     // heap via doubling reallocs and then textAll() copies it into a message
@@ -85,6 +90,8 @@ class WebUIPlugin : public Plugin {
     bool serverRunning = false;
     String updateComponent = "";
     float currentBluetoothWeight = 0.0f;
+    float currentWeight1 = 0.0f;
+    float currentWeight2 = 0.0f;
     // Reused for every 500ms status broadcast. Allocating a fresh JsonDocument
     // each tick was a major contributor to internal-heap fragmentation
     // (device reports 33%+ fragmentation, causing AsyncTCP buffer allocs to

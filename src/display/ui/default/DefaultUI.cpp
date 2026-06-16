@@ -228,7 +228,7 @@ void DefaultUI::init() {
     pluginManager->on("profiles:profile:favorite", [this](Event const &event) { reloadProfiles(); });
     pluginManager->on("profiles:profile:unfavorite", [this](Event const &event) { reloadProfiles(); });
     pluginManager->on("profiles:profile:save", [this](Event const &event) { reloadProfiles(); });
-    pluginManager->on("controller:volumetric-measurement:bluetooth:change", [=](Event const &event) {
+    pluginManager->on("controller:scale:measurement", [=](Event const &event) {
         double newWeight = event.getFloat("value");
         if (round(newWeight * 10.0) != round(bluetoothWeight * 10.0)) {
             bluetoothWeight = newWeight;
@@ -263,7 +263,7 @@ void DefaultUI::loop() {
         autotuning = controller->isAutotuning();
         const Settings &settings = controller->getSettings();
         volumetricAvailable = controller->isVolumetricAvailable();
-        bluetoothScales = controller->isBluetoothScaleHealthy();
+        bluetoothScales = controller->isVolumetricAvailable();
         volumetricMode = volumetricAvailable && settings.isVolumetricTarget();
         brewVolumetric = volumetricAvailable && profileVolumetric;
         grindActive = controller->isGrindActive();

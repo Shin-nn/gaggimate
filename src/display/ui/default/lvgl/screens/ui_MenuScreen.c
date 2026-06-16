@@ -62,7 +62,6 @@ void ui_event_MenuScreen_waterBtn(lv_event_t *e) {
 
 void ui_event_MenuScreen_grindBtn(lv_event_t *e) {
     lv_event_code_t event_code = lv_event_get_code(e);
-
     if (event_code == LV_EVENT_CLICKED) {
         onGrindScreen(e);
     }
@@ -197,6 +196,7 @@ void ui_MenuScreen_screen_init(void) {
     lv_obj_add_event_cb(ui_MenuScreen_waterBtn, ui_event_MenuScreen_waterBtn, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_MenuScreen_grindBtn, ui_event_MenuScreen_grindBtn, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_MenuScreen, ui_event_MenuScreen, LV_EVENT_ALL, NULL);
+
     uic_MenuScreen_dials_tempGauge = ui_comp_get_child(ui_MenuScreen_dials, UI_COMP_DIALS_TEMPGAUGE);
     uic_MenuScreen_dials_tempTarget = ui_comp_get_child(ui_MenuScreen_dials, UI_COMP_DIALS_TEMPTARGET);
     uic_MenuScreen_dials_pressureGauge = ui_comp_get_child(ui_MenuScreen_dials, UI_COMP_DIALS_PRESSUREGAUGE);

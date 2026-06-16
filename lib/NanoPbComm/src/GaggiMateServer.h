@@ -27,6 +27,9 @@ class GaggiMateServer {
     using TareCallback = std::function<void()>;
     using LedCallback = std::function<void(uint8_t channel, uint8_t brightness)>;
 
+    using SetScaleCalibrationCallback = std::function<void(const float scaleFactor1, const float scaleFactor2)>;
+    using CalibrateScaleCallback = std::function<void(uint8_t cell, float calibrationWeight)>;
+
     GaggiMateServer();
 
     void init(const String &deviceName, const String &hardware, const String &version,
@@ -42,6 +45,8 @@ class GaggiMateServer {
     gm::Payload buildButtonState(uint8_t index, bool pressed);
     gm::Payload buildAutotuneResult(float kp, float ki, float kd, float kf);
     gm::Payload buildVolumetricMeasurement(float volume);
+    gm::Payload buildScaleMeasurement(float weight, float weight1, float weight2);
+    gm::Payload buildScaleCalibrated(float scaleFactor1, float scaleFactor2);
     gm::Payload buildTofMeasurement(uint32_t distance);
     gm::Payload buildError(int code);
 
@@ -50,6 +55,8 @@ class GaggiMateServer {
     void sendButtonState(uint8_t index, bool pressed);
     void sendAutotuneResult(float kp, float ki, float kd, float kf);
     void sendVolumetricMeasurement(float volume);
+    void sendScaleMeasurement(float weight, float weight1, float weight2);
+    void sendScaleCalibrated(float scaleFactor1, float scaleFactor2);
     void sendTofMeasurement(uint32_t distance);
     void sendError(int code);
 
@@ -76,6 +83,8 @@ class GaggiMateServer {
     void onPressureScale(PressureScaleCallback cb) { _pressureScaleCb = std::move(cb); }
     void onTare(TareCallback cb) { _tareCb = std::move(cb); }
     void onLedControl(LedCallback cb) { _ledCb = std::move(cb); }
+    void onSetScaleCalibration(SetScaleCalibrationCallback cb) { _scaleCalibrationCb = std::move(cb); }
+    void onCalibrateScale(CalibrateScaleCallback cb) { _calibrateScaleCb = std::move(cb); }
 
   private:
     BleServerTransport _transport;
@@ -92,6 +101,8 @@ class GaggiMateServer {
     PressureScaleCallback _pressureScaleCb;
     TareCallback _tareCb;
     LedCallback _ledCb;
+    SetScaleCalibrationCallback _scaleCalibrationCb;
+    CalibrateScaleCallback _calibrateScaleCb;
 
     void registerHandlers();
     void pushSystemInfo();

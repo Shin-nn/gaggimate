@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 #include <version.h>
+#include "HardwareScalePlugin.h"
 
 // Incoming WebSocket payloads (profile uploads reserve up to 64 KB) are
 // reassembled here. Back the character storage with PSRAM so these large,
@@ -88,6 +89,13 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
     pluginManager->on("controller:autotune:result", [this](Event const &event) { sendAutotuneResult(); });
     pluginManager->on("controller:autotune:failed", [this](Event const &) { sendAutotuneFailed(); });
 
+    pluginManager->on("controller:scale:calibrate-failed", [this](Event const &event) {
+        sendScaleCalibrationFailed(event.getString("reason"));
+    });
+    pluginManager->on("controller:scale:calibrate-update", [this](Event const &event) {
+        sendScaleCalibrationResult(event.getFloat("scaleFactor1"),event.getFloat("scaleFactor2"));
+    });
+
     // Forward shot history rebuild progress events to WebSocket clients
     pluginManager->on("evt:history-rebuild-progress", [this](Event const &event) {
         JsonDocument doc(&psramAllocator);
@@ -98,9 +106,19 @@ void WebUIPlugin::setup(Controller *_controller, PluginManager *_pluginManager) 
         broadcastJson(doc);
     });
 
-    // Subscribe to Bluetooth scale weight updates
-    pluginManager->on("controller:volumetric-measurement:bluetooth:change",
-                      [this](Event const &event) { this->currentBluetoothWeight = event.getFloat("value"); });
+    // Subscribe to scale weight updates
+    pluginManager->on("controller:scale:measurement",
+                      [this](Event const &event) {
+                          this->currentBluetoothWeight = event.getFloat("value");
+    });
+
+    // Subscribe to scale weight updates
+    pluginManager->on("controller:scale:measurement_detail",
+                      [this](Event const &event) {
+                          this->currentWeight1 = event.getFloat("weight1");
+                          this->currentWeight2 = event.getFloat("weight2");
+                      });
+
 
     setupServer();
 }
@@ -167,6 +185,8 @@ void WebUIPlugin::loop() {
         statusDoc["rssi"] = 0;
         statusDoc["lat"] = -1; // BLE round-trip latency (ms); -1 = not yet measured
 
+        statusDoc["hs"] = controller->getSystemInfo().capabilities.hwScale;
+
         if (controller->getClientController()->getClient()->isConnected()) {
             statusDoc["rssi"] = controller->getClientController()->getClient()->getRssi();
         }
@@ -177,7 +197,11 @@ void WebUIPlugin::loop() {
         bool bleConnected = BLEScales.isConnected();
         // Add Bluetooth scale weight information
         statusDoc["bw"] = bleConnected ? this->currentBluetoothWeight : 0; // current bluetooth weight
-        statusDoc["cw"] = bleConnected ? this->currentBluetoothWeight : 0; // Use 'currentWeight' for forward compatbility
+
+        statusDoc["cw1"] = this->currentWeight1;
+        statusDoc["cw2"] = this->currentWeight2;
+
+        statusDoc["cw"] = this->controller->isVolumetricAvailable() ? this->currentBluetoothWeight : 0; // Use 'currentWeight' for forward compatbility
         statusDoc["bc"] = bleConnected;                                    // bluetooth scale connected status
         // Scale battery — only surfaced when the driver reports one and the
         // value isn't the UNKNOWN sentinel (255). UI omits the battery pill
@@ -313,6 +337,9 @@ void WebUIPlugin::setupServer() {
         doc["mode"] = controller->getMode();
         doc["tt"] = controller->getTargetTemp();
         doc["ct"] = controller->getCurrentTemp();
+        if (controller->isVolumetricAvailable()) {
+            doc["cw"] = currentBluetoothWeight;
+        }
         serializeJson(doc, *response);
         request->send(response);
     });
@@ -416,7 +443,7 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
     // If this is the final frame of the message, process and clear
     if (isFinal) {
         if (info->opcode == WS_TEXT) {
-            ESP_LOGV("WebUIPlugin", "Received request: %.*s", (int)buf.size(), buf.c_str());
+            ESP_LOGI("WebUIPlugin", "Received request: %.*s", (int)buf.size(), buf.c_str());
             JsonDocument doc(&psramAllocator);
             DeserializationError err = deserializeJson(doc, buf.c_str());
             if (!err) {
@@ -487,6 +514,19 @@ void WebUIPlugin::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocketClie
                     client->text(buffer);
                 } else if (msgType == "req:flush:start") {
                     handleFlushStart(client->id(), doc);
+                } else if (msgType == "req:scale:tare") {
+                    if (HardwareScales.isConnected()) {
+                        HardwareScales.tare();
+                    }
+                } else if (msgType == "req:scale:calibrate") {
+                    if ((doc["scaleWeight1"].is<float>() || doc["scaleWeight1"].is<int>()) && doc["scaleWeight1"].as<float>() >0.1) {
+                        HardwareScales.calibrate(0, doc["scaleWeight1"].as<float>());
+                    } else {
+                        ESP_LOGI("TMP", "IS NOT");
+                    }
+                    if ((doc["scaleWeight2"].is<float>() || doc["scaleWeight2"].is<int>()) && doc["scaleWeight2"].as<float>() >0.1) {
+                        HardwareScales.calibrate(1, doc["scaleWeight2"].as<float>());
+                    }
                 }
             }
         }
@@ -699,6 +739,16 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
             if (request->hasArg("altRelayFunction"))
                 settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
+            if (request->hasArg("buttonBehavior"))
+                settings->setButtonBehaviorList(explode(request->arg("buttonBehavior"), ','));
+            if (request->hasArg("commutationGain"))
+                settings->setCommutationGain(request->arg("commutationGain").toFloat());
+            if (request->hasArg("convergenceGain"))
+                settings->setConvergenceGain(request->arg("convergenceGain").toFloat());
+            if (request->hasArg("integralGain"))
+                settings->setIntegralGain(request->arg("integralGain").toFloat());
+            if (request->hasArg("maxPumpPower"))
+                settings->setMaxPumpPower(request->arg("maxPumpPower").toFloat());
             if (request->hasArg("customOTAURL")) {
                 settings->setCustomOTAUrl(request->arg("customOTAURL"));
                 ota->setReleaseUrl(createOtaURL()   );
@@ -757,6 +807,20 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 }
                 settings->setAutoWakeupSchedules(schedules);
             }
+
+            settings->setHardwareScale(request->hasArg("hardwareScale"));
+
+            if (request->hasArg("scaleFactor1") || request->hasArg("scaleFactor2")) {
+                float scaleFactor1 = settings->getScaleFactor1();
+                float scaleFactor2 = settings->getScaleFactor2();
+                if (request->hasArg("scaleFactor1"))
+                    scaleFactor1 = request->arg("scaleFactor1").toFloat();
+                if (request->hasArg("scaleFactor2"))
+                    scaleFactor2 = request->arg("scaleFactor2").toFloat();
+                settings->setScaleFactors(scaleFactor1, scaleFactor2);
+                controller->getClientController()->sendScaleCalibration(scaleFactor1, scaleFactor2);
+            }
+
             settings->save(true);
         });
         pluginManager->trigger("settings:changed");
@@ -836,6 +900,11 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
         }
     }
     doc["autowakeupSchedules"] = schedulesStr;
+
+    doc["hardwareScale"] = settings.isHardwareScale();
+    doc["scaleFactor1"] = settings.getScaleFactor1();
+    doc["scaleFactor2"] = settings.getScaleFactor2();
+
     serializeJson(doc, *response);
     request->send(response);
 
@@ -997,6 +1066,20 @@ void WebUIPlugin::sendAutotuneFailed() {
     // instead of stuck spinner. Fires on ERROR_CODE_AUTOTUNE_TIMEOUT.
     JsonDocument doc(&psramAllocator);
     doc["tp"] = "evt:autotune-failed";
+    broadcastJson(doc);
+}
+void WebUIPlugin::sendScaleCalibrationFailed(const String &reason){
+    JsonDocument doc(&psramAllocator);
+    doc["tp"] = "evt:scale:calibrate-failed";
+    doc["reason"] = reason;
+    broadcastJson(doc);
+}
+
+void WebUIPlugin::sendScaleCalibrationResult(float scaleFactor1, float scaleFactor2){
+    JsonDocument doc(&psramAllocator);
+    doc["tp"] = "evt:scale:calibrate-result";
+    doc["scaleFactor1"] = scaleFactor1;
+    doc["scaleFactor2"] = scaleFactor2;
     broadcastJson(doc);
 }
 

@@ -163,6 +163,9 @@ export function Settings() {
       if (key === 'boilerFillActive') {
         value = !formData.boilerFillActive;
       }
+      if (key === 'hardwareScale') {
+        value = !formData.hardwareScale;
+      }
       if (key === 'smartGrindActive') {
         value = !formData.smartGrindActive;
       }
@@ -200,6 +203,10 @@ export function Settings() {
       if (key === 'dashboardLayout') {
         setDashboardLayout(value);
       }
+        console.log({
+            ...formData,
+            [key]: value,
+        });
       setFormData({
         ...formData,
         [key]: value,
@@ -235,6 +242,36 @@ export function Settings() {
     newSchedules[scheduleIndex].days[dayIndex] = enabled;
     setAutoWakeupSchedules(newSchedules);
   };
+
+  const runCalibration = () => {
+      setCalibrationActive(true);
+      apiService.send({
+          tp: 'req:scale:calibrate',
+          scaleWeight1: formData.scaleWeight1 ? Number(formData.scaleWeight1) : null,
+          scaleWeight2: formData.scaleWeight2 ? Number(formData.scaleWeight2) : null
+      });
+  };
+
+    const [calibrationActive, setCalibrationActive] = useState(false);
+    const [calibrationFailed, setCalibrationFailed] = useState(false);
+    const [calibrationResult, setCalibrationResult] = useState(null);
+
+  useEffect(() => {
+    const resultListener = apiService.on('evt:scale:calibrate-result', msg => {
+        setCalibrationActive(false);
+        setCalibrationFailed(false);
+        setCalibrationResult( msg);
+    });
+    const failedListener = apiService.on('evt:scale:calibrate-failed', () => {
+        setCalibrationActive(false);
+        setCalibrationFailed(true);
+        setCalibrationResult(null);
+    });
+    return () => {
+        apiService.off('evt:scale:calibrate-result', resultListener);
+        apiService.off('evt:scale:calibrate-failed', failedListener);
+    };
+  }, [apiService]);
 
   const onSubmit = useCallback(
     async (e, restart = false) => {
@@ -272,6 +309,7 @@ export function Settings() {
       if (restart) {
         formDataToSubmit.append('restart', '1');
       }
+      console.log(formDataToSubmit)
       const response = await fetch(form.action, {
         method: 'post',
         body: formDataToSubmit,
@@ -1089,6 +1127,10 @@ export function Settings() {
               removeAutoWakeupSchedule={removeAutoWakeupSchedule}
               updateAutoWakeupTime={updateAutoWakeupTime}
               updateAutoWakeupDay={updateAutoWakeupDay}
+              runCalibration={runCalibration}
+              calibrationActive = {calibrationActive}
+              calibrationFailed = {calibrationFailed}
+              calibrationResult = {calibrationResult}
             />
           </Card>
         </div>

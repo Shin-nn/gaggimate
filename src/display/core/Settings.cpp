@@ -121,6 +121,11 @@ Settings::Settings() {
     String buttonBehaviorStr = preferences.getString("btnb", "brew,steam,water");
     buttonBehavior = explode(buttonBehaviorStr, ',');
 
+    hardwareScale = preferences.getBool("hardware_scale", false);
+    // Hardware scale settings
+    scaleFactor1 = preferences.getFloat("hs_sf1", 0.0f);
+    scaleFactor2 = preferences.getFloat("hs_sf2", 0.0f);
+
     preferences.end();
 
     xTaskCreate(loopTask, "Settings::loop", configMINIMAL_STACK_SIZE * 6, this, 1, &taskHandle);
@@ -454,6 +459,11 @@ void Settings::setFullTankDistance(int full_tank_distance) {
     save();
 }
 
+void Settings::setHardwareScale(bool enabled){
+    hardwareScale = enabled;
+    save();
+}
+
 void Settings::setAltRelayFunction(int alt_relay_function) { altRelayFunction = alt_relay_function; }
 
 void Settings::setAutoWakeupEnabled(bool enabled) {
@@ -476,6 +486,12 @@ void Settings::setButtonBehavior(int index, String behavior) {
 
 void Settings::setButtonBehaviorList(const std::vector<String> &behavior_list) {
     buttonBehavior = behavior_list;
+    save();
+}
+
+void Settings::setScaleFactors(float scale_factor_1, float scale_factor_2) {
+    scaleFactor1 = scale_factor_1;
+    scaleFactor2 = scale_factor_2;
     save();
 }
 
@@ -587,6 +603,11 @@ void Settings::doSave() {
     preferences.putFloat("p_ig", integralGain);
     preferences.putFloat("p_mp", maxPumpPower);
     preferences.putString("custom_ota_url", customOTAURL);
+
+    // Hardware scale settings
+    preferences.putBool("hardware_scale", hardwareScale);
+    preferences.putFloat("hs_sf1", scaleFactor1);
+    preferences.putFloat("hs_sf2", scaleFactor2);
 
     preferences.end();
 }

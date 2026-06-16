@@ -4,8 +4,13 @@ import homekitImage from '../../assets/homekit.png';
 import { faCalendarDays } from '@fortawesome/free-solid-svg-icons/faCalendarDays';
 import { computed } from '@preact/signals';
 import { machine } from '../../services/ApiService.js';
+import {InputGroupField} from "../../components/SettingsFormField.jsx";
+import {useEffect} from "preact/hooks";
+import {OverviewChart} from "../../components/OverviewChart.jsx";
+import {Spinner} from "../../components/Spinner.jsx";
 
 const gearpumpAddon = computed(() => machine.value.capabilities.gearpumpAddon);
+
 
 export function PluginCard({
   formData,
@@ -15,6 +20,10 @@ export function PluginCard({
   removeAutoWakeupSchedule,
   updateAutoWakeupTime,
   updateAutoWakeupDay,
+  runCalibration,
+  calibrationActive,
+  calibrationFailed,
+  calibrationResult
 }) {
   return (
     <div className='space-y-4'>
@@ -370,6 +379,148 @@ export function PluginCard({
               />
             </div>
           </div>
+        )}
+      </div>
+
+      <div className='bg-base-200 rounded-lg p-4'>
+        <div className='flex items-center justify-between'>
+            <span className='text-xl font-medium'>Hardware Scale</span>
+            <input
+                id='hardwareScale'
+                name='hardwareScale'
+                value='hardwareScale'
+                type='checkbox'
+                className='toggle toggle-primary'
+                checked={!!formData.hardwareScale}
+                onChange={onChange('hardwareScale')}
+                aria-label='Enable Hardware scales'
+            />
+        </div>
+        {formData.hardwareScale && (
+            <div className='border-base-300 mt-4 space-y-4 border-t pt-4'>
+                <p className='text-sm opacity-70'>
+                    This feature enables hardware scale.
+                </p>
+                <div className='form-control'>
+                    <label htmlFor='hwScaleFactor1' className='mb-2 block text-sm font-medium'>
+                        Scale Factor 1
+                    </label>
+                    <input
+                        id='scaleFactor1'
+                        name='scaleFactor1'
+                        type='number'
+                        step="0.001"
+                        className='input input-bordered w-full'
+                        placeholder='0'
+                        value={formData.scaleFactor1}
+                        onChange={onChange('scaleFactor1')}
+                    />
+                </div>
+
+                <div className='form-control'>
+                    <label htmlFor='hwScaleFactor2' className='mb-2 block text-sm font-medium'>
+                        Scale Factor 2
+                    </label>
+                    <input
+                        id='scaleFactor2'
+                        name='scaleFactor2'
+                        type='number'
+                        tep="0.001"
+                        className='input input-bordered w-full'
+                        placeholder='0'
+                        value={formData.scaleFactor2}
+                        onChange={onChange('scaleFactor2')}
+                    />
+                </div>
+
+                <p className='text-sm opacity-70'>
+                    Auto calibration options
+                </p>
+
+                <div className='grid grid-cols-2 gap-4'>
+                    <InputGroupField
+                        label='Weight for scale 1 calibration'
+                        htmlFor='scaleWeight1'
+                        unit='g'
+                        unitAriaLabel='grams'
+                    >
+                        <input
+                            id='scaleWeight1'
+                            name='scaleWeight1'
+                            type='number'
+                            className='grow'
+                            placeholder='0'
+                            value={formData.scaleWeight1}
+                            onChange={onChange('scaleWeight1')}
+                        />
+                    </InputGroupField>
+                    <InputGroupField
+                    label='Weight for scale 2 calibration'
+                    htmlFor='scaleWeight2'
+                    unit='g'
+                    unitAriaLabel='grams'
+                    >
+                        <input
+                            id='scaleWeight2'
+                            name='scaleWeight2'
+                            type='number'
+                            className='grow'
+                            placeholder='0'
+                            value={formData.scaleWeight2}
+                            onChange={onChange('scaleWeight2')}
+                        />
+                    </InputGroupField>
+                </div>
+
+                <button
+                    type='button'
+                    onClick={runCalibration}
+                    className='btn btn-primary btn-sm'
+                    disabled={!formData.hardwareScale}
+                >
+                    Run calibration
+                </button>
+                {calibrationActive && (
+                    <div className='space-y-4'>
+                        <div className='flex flex-col items-center justify-center space-y-4 py-4'>
+                            <div className='flex items-center space-x-3'>
+                                <Spinner size={8} />
+                                <span className='text-lg font-medium'>Calibration in Progress</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {calibrationFailed && (
+                    <div className='space-y-4 text-center'>
+                        <div className='alert alert-error mx-auto max-w-md'>
+                            <div>
+                                <h3 className='font-bold'>Calibration Failed</h3>
+                                <div className='text-sm'>
+                                    {calibrationFailed}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {calibrationResult && (
+                    <div className='space-y-4 text-center'>
+                        <div className='alert alert-success mx-auto max-w-md'>
+                            <div>
+                                <h3 className='font-bold'>Calibration Success</h3>
+                                <div className='text-sm'>
+                                    Computed factor 1: {calibrationResult.scaleFactor1}
+                                </div>
+                                <div className='text-sm'>
+                                    Computed factor 2: {calibrationResult.scaleFactor2}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+            </div>
         )}
       </div>
 

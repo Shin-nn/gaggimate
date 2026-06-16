@@ -16,7 +16,7 @@
 const IPAddress WIFI_AP_IP(4, 4, 4, 1); // the IP address the web server, Samsung requires the IP to be in public space
 const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https://avinetworks.com/glossary/subnet-mask/
 
-enum class VolumetricMeasurementSource { INACTIVE, FLOW_ESTIMATION, BLUETOOTH };
+enum class VolumetricMeasurementSource { INACTIVE, FLOW_ESTIMATION, MEASUREMENT };
 
 class Controller {
   public:
@@ -92,8 +92,8 @@ class Controller {
     void onProfileSave() const;
     void onProfileSaveAsNew();
     void onVolumetricMeasurement(double measurement, VolumetricMeasurementSource source);
-    void setVolumetricOverride(bool override) { volumetricOverride = override; }
-    bool isBluetoothScaleHealthy() const;
+    void onScaleMeasurement(float w, float w1, float w2);
+    void setHardwareScaleAvailable(bool override) { hardwareScaleAvailable = override; }
     void onFlush();
     int getWaterLevel() const {
         float reversedLevel = static_cast<float>(settings.getEmptyTankDistance()) -
@@ -118,7 +118,7 @@ class Controller {
 #endif
     void setupBluetooth();
     void onSystemInfo(const char *hardware, const char *version, uint32_t protocolVersion, bool dimming, bool pressure,
-                      bool ledControl, bool tof, std::vector<uint32_t> addons);
+                      bool ledControl, bool tof, std::vector<uint32_t> addons, bool hwScale);
     // Connected to a controller too old to speak the framed protocol: drive the
     // same path as a protocol-version mismatch (OTA recovery only). infoJson is
     // the legacy INFO characteristic contents (hardware/version/capabilities).
@@ -195,7 +195,7 @@ class Controller {
     bool screenReady = false;
     bool waitingForController = false;
     unsigned long connectStartTime = 0;
-    bool volumetricOverride = false;
+    bool hardwareScaleAvailable = false;
     bool processCompleted = false;
     bool steamReady = false;
     bool sdcard = false;
@@ -203,8 +203,8 @@ class Controller {
 
     // Bluetooth scale connection monitoring
     VolumetricMeasurementSource currentVolumetricSource = VolumetricMeasurementSource::INACTIVE;
-    unsigned long lastBluetoothMeasurement = 0;
-    static const unsigned long BLUETOOTH_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
+    unsigned long lastWeightMeasurement = 0;
+    static const unsigned long WEIGHT_GRACE_PERIOD_MS = 1500; // 1.5 second grace period
     static const unsigned long CONTROLLER_WAITING_TIMEOUT_MS = 10000;
 
     xTaskHandle logicTaskHandle;

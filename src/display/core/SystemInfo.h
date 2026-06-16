@@ -14,6 +14,7 @@ struct SystemCapabilities {
     std::vector<uint32_t> addons;
 
     bool hasAddon(uint32_t addon) const { return std::find(addons.begin(), addons.end(), addon) != addons.end(); }
+    bool hwScale;
 };
 
 struct SystemInfo {
