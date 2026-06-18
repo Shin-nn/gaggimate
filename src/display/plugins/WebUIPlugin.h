@@ -25,6 +25,7 @@ class WebUIPlugin : public Plugin {
   public:
     WebUIPlugin();
     void setup(Controller *controller, PluginManager *pluginManager) override;
+    String createOtaURL();
     void loop() override;
 
   private:
