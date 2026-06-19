@@ -69,6 +69,7 @@ class Settings {
     String getPumpModelCoeffs() const { return pumpModelCoeffs; }
     String getWifiSsid() const { return wifiSsid; }
     String getWifiPassword() const { return wifiPassword; }
+    String getWifiApPassword() const { return wifiApPassword; }
     String getMdnsName() const { return mdnsName; }
     bool isHomekit() const { return homekit; }
     bool isVolumetricTarget() const { return volumetricTarget; }
@@ -155,6 +156,7 @@ class Settings {
     void setPumpModelCoeffs(const String &pumpModelCoeffs);
     void setWifiSsid(const String &wifiSsid);
     void setWifiPassword(const String &wifiPassword);
+    void setWifiApPassword(const String &wifiApPassword);
     void setMdnsName(const String &mdnsName);
     void setHomekit(bool homekit);
     void setVolumetricTarget(bool volumetric_target);
@@ -238,6 +240,7 @@ class Settings {
     String pid = DEFAULT_PID;
     String wifiSsid = "";
     String wifiPassword = "";
+    String wifiApPassword = ""; // empty until generated on first start
     String mdnsName = DEFAULT_MDNS_NAME;
     String savedScale = "";
     bool homekit = false;

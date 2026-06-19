@@ -21,7 +21,16 @@
 
 static EffectManager effect_mgr;
 
-static constexpr uint32_t STARTUP_FADE_MS = 2000; // standby fade-in duration on power-up
+static constexpr uint32_t STARTUP_FADE_MS = 1000; // standby fade-in duration on power-up
+
+static constexpr int32_t GAUGE_TICK_LONG = 25;      // meter tick length on most screens
+static constexpr int32_t GAUGE_TICK_SHORT = 10;     // shortened tick length on profile / new-menu screens
+static constexpr uint32_t GAUGE_TICK_ANIM_MS = 300; // tick length transition duration
+
+// Profile and the new menu screen show shortened meter ticks.
+static bool isShortTickScreen(ScreensEnum s) {
+    return s == SCREEN_ID_PROFILE_SCREEN || s == SCREEN_ID_MENU_SCREEN_NEW || s == SCREEN_ID_INFO_SCREEN;
+}
 
 // Format a millisecond duration as "m:ss" for the brew/profile time labels.
 static void formatDuration(unsigned long ms, char *buf, size_t len) {
@@ -375,6 +384,48 @@ void DefaultUI::setupState() {
     updateProfileInfo();
     updateBoiler();
     updateBrewProcess();
+
+    effect_mgr.use_effect([this]() { return currentScreen == SCREEN_ID_INFO_SCREEN; },
+                          [=]() {
+                              String content = "";
+                              if (apActive) {
+                                  // WIFI: QR syntax — escape \ ; , : " in the password per the spec.
+                                  const String pw = controller->getSettings().getWifiApPassword();
+                                  String escaped;
+                                  escaped.reserve(pw.length() + 4);
+                                  for (size_t i = 0; i < pw.length(); i++) {
+                                      const char c = pw.charAt(i);
+                                      if (c == '\\' || c == ';' || c == ',' || c == ':' || c == '"') {
+                                          escaped += '\\';
+                                      }
+                                      escaped += c;
+                                  }
+                                  if (escaped.isEmpty()) {
+                                      content = "WIFI:S:GaggiMate;;;;";
+                                  } else {
+                                      content = "WIFI:S:GaggiMate;T:WPA;P:" + escaped + ";;";
+                                  }
+                              } else if (wifiConnected) {
+                                  content = "http://" + WiFi.localIP().toString() + "/";
+                              }
+                              if (content == "") {
+                                  return;
+                              }
+                              const char *data = content.c_str();
+                              lv_qrcode_update(objects.qrcode, data, strlen(data));
+                          },
+                          &wifiConnected, &apActive);
+    effect_mgr.use_effect([this]() { return currentScreen == SCREEN_ID_MENU_SCREEN_NEW; },
+                          [this]() {
+                              int step = 360 / (grindAvailable ? 5 : 4);
+                              int offset = grindAvailable ? 1 : 0;
+                              positionMenuIcon(objects.btn_steam_1, 0, 145);
+                              positionMenuIcon(objects.btn_water_1, step, 145);
+                              positionMenuIcon(objects.btn_grind_1, step * 2, 145);
+                              positionMenuIcon(objects.btn_info_1, step * (2 + offset), 145);
+                              positionMenuIcon(objects.btn_brew_1, step * (3 + offset), 145);
+                          },
+                          &grindAvailable);
 }
 
 void DefaultUI::handleScreenChange() {
@@ -386,15 +437,75 @@ void DefaultUI::handleScreenChange() {
             setBrightness(settings.getMainBrightness());
         }
         eez_flow_set_screen(targetScreen, LV_SCR_LOAD_ANIM_NONE, 0, 0);
+        animateGaugeTicks(currentScreen, targetScreen);
         rerender = true;
     }
 }
 
+// Collect every lv_meter under obj (the dial gauges) so their tick length can be animated together.
+void DefaultUI::collectMeters(lv_obj_t *obj) {
+    const uint32_t n = lv_obj_get_child_cnt(obj);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(obj, i);
+        if (gaugeCount < 4 && lv_obj_check_type(child, &lv_meter_class)) {
+            gaugeMeters[gaugeCount++] = child;
+        }
+        collectMeters(child);
+    }
+}
+
+void DefaultUI::setGaugeTickLength(int32_t len) {
+    for (uint8_t i = 0; i < gaugeCount; i++) {
+        auto *meter = reinterpret_cast<lv_meter_t *>(gaugeMeters[i]);
+        auto *scale = static_cast<lv_meter_scale_t *>(_lv_ll_get_head(&meter->scale_ll));
+        if (scale != nullptr) {
+            scale->tick_length = static_cast<uint16_t>(len);
+        }
+        lv_obj_invalidate(gaugeMeters[i]);
+    }
+}
+
+void DefaultUI::gaugeTickAnimCb(void *var, int32_t v) { static_cast<DefaultUI *>(var)->setGaugeTickLength(v); }
+
+void DefaultUI::animateGaugeTicks(ScreensEnum from, ScreensEnum to) {
+    const int32_t fromLen = isShortTickScreen(from) ? GAUGE_TICK_SHORT : GAUGE_TICK_LONG;
+    const int32_t toLen = isShortTickScreen(to) ? GAUGE_TICK_SHORT : GAUGE_TICK_LONG;
+
+    lv_anim_del(this, gaugeTickAnimCb); // cancel any in-flight tick animation
+    gaugeCount = 0;
+    collectMeters(lv_scr_act());
+    if (gaugeCount == 0) {
+        return;
+    }
+    // Start at the previous screen's length so the ticks morph continuously in both directions.
+    setGaugeTickLength(fromLen);
+    if (fromLen == toLen) {
+        return;
+    }
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, this);
+    lv_anim_set_exec_cb(&a, gaugeTickAnimCb);
+    lv_anim_set_values(&a, fromLen, toLen);
+    lv_anim_set_time(&a, GAUGE_TICK_ANIM_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
+void DefaultUI::positionMenuIcon(lv_obj_t *obj, int angle, int radius) {
+    int x = sin(angle * M_PI / 180) * radius;
+    int y = -1 * cos(angle * M_PI / 180) * radius;
+    lv_obj_set_pos(obj, x, y);
+}
+
 void DefaultUI::updateState() {
+    auto settings = controller->getSettings();
     mode = controller->getMode();
     currentTemp = static_cast<int>(controller->getCurrentTemp());
     targetTemp = static_cast<int>(controller->getTargetTemp());
     pressureAvailable = controller->getSystemInfo().capabilities.pressure ? 1 : 0;
+    wifiConnected = WiFi.status() == WL_CONNECTED;
+    grindAvailable = settings.isSmartGrindActive() || settings.getAltRelayFunction() == ALT_RELAY_GRIND;
 
     uiFlags.brew_adjustments(brewScreenState == BrewScreenState::Settings);
     uiFlags.active(controller->isActive());
@@ -421,7 +532,11 @@ void DefaultUI::updateSystemStatus() {
     systemStatus.update_available(updateAvailable);
     systemStatus.in_menu(currentScreen == SCREEN_ID_MENU_SCREEN);
     systemStatus.pressure_available(pressureAvailable);
-    systemStatus.grind_available(settings.isSmartGrindActive() || settings.getAltRelayFunction() == ALT_RELAY_GRIND);
+    systemStatus.grind_available(grindAvailable);
+    systemStatus.mode(mode);
+    systemStatus.ip(apActive ? "4.4.4.1" : WiFi.localIP().toString().c_str());
+    systemStatus.network(apActive ? "GaggiMate" : systemStatus.wifi() ? settings.getWifiSsid().c_str() : "Disconnected");
+    systemStatus.ap_active(apActive);
 
     char timeBuf[12] = "";
     struct tm timeinfo;
@@ -568,6 +683,8 @@ void DefaultUI::updateBrewProcess() {
     brewProcess.is_complete(process->isComplete());
 }
 
+void DefaultUI::updateMenuScreen() {}
+
 String DefaultUI::getErrorMessage() {
     if (controller->isUpdating()) {
         return "Updating...";
@@ -596,17 +713,15 @@ String DefaultUI::getErrorMessage() {
 void DefaultUI::applyTheme() {
     const ::Settings &settings = controller->getSettings();
     int newThemeMode = settings.getThemeMode();
+#ifndef GAGGIMATE_SIM // Amoled-specific black theme override is device-only
+    if (newThemeMode == 0 && panelDriver == AmoledDisplayDriver::getInstance()) {
+        newThemeMode = THEME_ID_AMOLED_DARK;
+    }
+#endif
 
     if (newThemeMode != currentThemeMode) {
         currentThemeMode = newThemeMode;
         change_color_theme(currentThemeMode);
-        // ui_theme_set(currentThemeMode);
-
-#ifndef GAGGIMATE_SIM // Amoled-specific black theme override is device-only
-        if (AmoledDisplayDriver::getInstance() == panelDriver && currentThemeMode == THEME_ID_DARK) {
-            enable_amoled_black_theme_override(lv_disp_get_default());
-        }
-#endif
     }
 }
 

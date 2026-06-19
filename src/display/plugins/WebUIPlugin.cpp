@@ -638,6 +638,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setMdnsName(request->arg("mdnsName"));
             if (request->hasArg("wifiPassword") && request->arg("wifiPassword") != "---unchanged---")
                 settings->setWifiPassword(request->arg("wifiPassword"));
+            if (request->hasArg("apPassword") && request->arg("apPassword").length() >= WIFI_AP_PASSWORD_MIN_LENGTH)
+                settings->setWifiApPassword(request->arg("apPassword"));
             settings->setHomekit(request->hasArg("homekit"));
             settings->setBoilerFillActive(request->hasArg("boilerFillActive"));
             if (request->hasArg("startupFillTime"))
@@ -714,6 +716,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
                 settings->setIntegralGain(request->arg("integralGain").toFloat());
             if (request->hasArg("maxPumpPower"))
                 settings->setMaxPumpPower(request->arg("maxPumpPower").toFloat());
+            if (request->hasArg("savedScale"))
+                settings->setSavedScale(request->arg("savedScale"));
             settings->setAutoWakeupEnabled(request->hasArg("autowakeupEnabled"));
             if (request->hasArg("autowakeupSchedules")) {
                 // Handle schedule format with days
@@ -782,6 +786,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();
     doc["wifiPassword"] = apMode ? "---unchanged---" : settings.getWifiPassword();
+    doc["apPassword"] = settings.getWifiApPassword();
     doc["mdnsName"] = settings.getMdnsName();
     doc["temperatureOffset"] = String(settings.getTemperatureOffset());
     doc["pressureScaling"] = String(settings.getPressureScaling());
@@ -819,6 +824,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) {
     doc["convergenceGain"] = settings.getConvergenceGain();
     doc["integralGain"] = settings.getIntegralGain();
     doc["maxPumpPower"] = settings.getMaxPumpPower();
+    doc["savedScale"] = settings.getSavedScale();
 
     doc["customOTAURL"] = settings.getCustomOTAURL();
 

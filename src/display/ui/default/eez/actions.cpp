@@ -21,8 +21,7 @@ void action_on_load_started(lv_event_t *e) {
 
 void action_on_menu_click(lv_event_t *e) {
     controller.deactivate();
-    controller.setMode(MODE_BREW);
-    controller.getUI()->changeScreen(SCREEN_ID_MENU_SCREEN);
+    controller.getUI()->changeScreen(SCREEN_ID_MENU_SCREEN_NEW);
 };
 
 void action_on_brew_screen(lv_event_t *e) {
@@ -114,7 +113,8 @@ void action_on_meter_draw(lv_event_t *e) {
     lv_obj_t *obj = lv_event_get_target(e);
     lv_area_t content;
     lv_obj_get_content_coords(obj, &content);
-    const lv_coord_t r_out = LV_MIN(lv_area_get_width(&content), lv_area_get_height(&content)) / 2;
+    // Pull the ring in 2px so round cap/dot tips clear the meter's outer radius mask (else they look shaved).
+    const lv_coord_t r_out = LV_MIN(lv_area_get_width(&content), lv_area_get_height(&content)) / 2 - 2;
     const lv_coord_t r_in = r_out - scale->tick_length;
     const lv_coord_t cap = dsc->line_dsc->width / 2;
 
@@ -128,18 +128,35 @@ void action_on_meter_draw(lv_event_t *e) {
     const float ux = dx / len;
     const float uy = dy / len;
 
-    // Inset each end by the cap radius so the round caps land on r_in/r_out, not clipped. Round (not
-    // truncate) the coords so every tick lands on the same sub-pixel grid and the ring looks even.
-    lv_point_t inner = {(lv_coord_t)lroundf(dsc->p1->x + ux * (r_in + cap)), (lv_coord_t)lroundf(dsc->p1->y + uy * (r_in + cap))};
-    lv_point_t outer = {(lv_coord_t)lroundf(dsc->p1->x + ux * (r_out - cap)),
-                        (lv_coord_t)lroundf(dsc->p1->y + uy * (r_out - cap))};
-
-    lv_draw_line_dsc_t pill = *dsc->line_dsc;
-    pill.opa = LV_OPA_COVER; // ticks are opaque; guard against the persisted suppression below
-    pill.round_start = 1;
-    pill.round_end = 1;
-    pill.raw_end = 0;
-    lv_draw_line(dsc->draw_ctx, &pill, &inner, &outer);
+    if (scale->tick_length > dsc->line_dsc->width) {
+        // Tall enough for a pill: a line with round caps, inset by the cap radius so the caps land on
+        // r_in/r_out. Round (not truncate) the coords so every tick lands evenly on the pixel grid.
+        lv_point_t inner = {(lv_coord_t)lroundf(dsc->p1->x + ux * (r_in + cap)),
+                            (lv_coord_t)lroundf(dsc->p1->y + uy * (r_in + cap))};
+        lv_point_t outer = {(lv_coord_t)lroundf(dsc->p1->x + ux * (r_out - cap)),
+                            (lv_coord_t)lroundf(dsc->p1->y + uy * (r_out - cap))};
+        lv_draw_line_dsc_t pill = *dsc->line_dsc;
+        pill.opa = LV_OPA_COVER; // ticks are opaque; guard against the persisted suppression below
+        pill.round_start = 1;
+        pill.round_end = 1;
+        pill.raw_end = 0;
+        lv_draw_line(dsc->draw_ctx, &pill, &inner, &outer);
+    } else {
+        // Band is one width tall or less: the pill has collapsed to a dot, so draw a filled circle.
+        // (lv_draw_line renders nothing for a zero-length line, which is why short ticks vanished.)
+        const float rad = scale->tick_length / 2.0f;
+        const float cr = r_out - rad; // centre of the tick band
+        const lv_coord_t cx = (lv_coord_t)lroundf(dsc->p1->x + ux * cr);
+        const lv_coord_t cy = (lv_coord_t)lroundf(dsc->p1->y + uy * cr);
+        const lv_coord_t ri = (lv_coord_t)lroundf(rad);
+        lv_draw_rect_dsc_t dot;
+        lv_draw_rect_dsc_init(&dot);
+        dot.bg_color = dsc->line_dsc->color;
+        dot.bg_opa = LV_OPA_COVER;
+        dot.radius = LV_RADIUS_CIRCLE;
+        lv_area_t area = {(lv_coord_t)(cx - ri), (lv_coord_t)(cy - ri), (lv_coord_t)(cx + ri), (lv_coord_t)(cy + ri)};
+        lv_draw_rect(dsc->draw_ctx, &dot, &area);
+    }
 
     // Suppress lv_meter's own sharp-cornered tick (we drew the rounded one).
     dsc->line_dsc->opa = LV_OPA_TRANSP;
@@ -196,24 +213,19 @@ void action_on_screen_load(lv_event_t *e) {
     applyClickArea(objects.select_profile, 30);
     applyClickArea(objects.previous_profile, 30);
     applyClickArea(objects.next_profile, 30);
-    applyClickArea(objects.btn_brew, 15);
-    applyClickArea(objects.btn_steam, 15);
-    applyClickArea(objects.btn_water, 15);
-    applyClickArea(objects.btn_steam, 15);
-    applyClickArea(objects.obj0__standby_icon, 20);
-    applyClickArea(objects.obj1__standby_icon, 20);
-    applyClickArea(objects.obj2__standby_icon, 20);
-    applyClickArea(objects.obj3__standby_icon, 20);
-    applyClickArea(objects.obj4__standby_icon, 20);
-    applyClickArea(objects.obj5__standby_icon, 20);
-    applyClickArea(objects.obj6__standby_icon, 20);
-    applyClickArea(objects.obj0__menu_icon, 20);
-    applyClickArea(objects.obj1__menu_icon, 20);
-    applyClickArea(objects.obj2__menu_icon, 20);
-    applyClickArea(objects.obj3__menu_icon, 20);
-    applyClickArea(objects.obj4__menu_icon, 20);
-    applyClickArea(objects.obj5__menu_icon, 20);
-    applyClickArea(objects.obj6__menu_icon, 20);
+    applyClickArea(objects.btn_brew_1, 15);
+    applyClickArea(objects.btn_steam_1, 15);
+    applyClickArea(objects.btn_water_1, 15);
+    applyClickArea(objects.btn_grind_1, 15);
+    applyClickArea(objects.btn_info_1, 15);
+    applyClickArea(objects.menu_dials__standby_icon, 20);
+    applyClickArea(objects.brew_dials__menu_icon, 20);
+    applyClickArea(objects.status_dials__menu_icon, 20);
+    applyClickArea(objects.steam_dials__menu_icon, 20);
+    applyClickArea(objects.water_dials__menu_icon, 20);
+    applyClickArea(objects.grind_dials__menu_icon, 20);
+    applyClickArea(objects.profile_dials__menu_icon, 20);
+    applyClickArea(objects.info_menu_icon, 20);
     applyClickArea(objects.start_button, 25);
     applyClickArea(objects.water_start_button, 25);
     applyClickArea(objects.grind_start_button, 25);
@@ -258,3 +270,5 @@ void action_on_screen_swipe(lv_event_t *e) {
         }
     }
 }
+
+void action_on_info_screen(lv_event_t *e) { controller.getUI()->changeScreen(SCREEN_ID_INFO_SCREEN); }
