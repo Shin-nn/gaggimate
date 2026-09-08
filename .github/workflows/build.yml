@@ -5,7 +5,10 @@ on:
 
 name: Build
 jobs:
+  ota-testbench:
+    uses: ./.github/workflows/ota-testbench.yml
   build:
+    needs: ota-testbench
     runs-on: ubuntu-latest
     env:
       HAS_UPLOAD_SECRETS: ${{ secrets.UPDATE_SERVER_HOST != '' && secrets.UPDATE_SERVER_API_KEY != '' }}
